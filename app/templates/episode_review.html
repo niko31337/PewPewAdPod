@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/feeds/{{ feed.id }}">&larr; {{ feed.title }}</a></p>
+<h1>Review: {{ episode.title }}</h1>
+<p class="muted">Schwelle für Vorauswahl: {{ (threshold * 100) | round(0) | int }}%</p>
+
+<div class="card">
+  <audio id="player" controls src="/media/audio/originals/{{ episode.id }}.mp3"></audio>
+
+  <div class="timeline-wrap">
+    <div class="timeline" id="timeline" data-duration-ms="{{ duration_ms }}">
+      <div class="timeline-ruler" id="timeline-ruler"></div>
+      {% for row in segment_rows %}
+      {% set seg = row.segment %}
+      <div class="timeline-segment {{ seg.confidence | conf_class }} {{ 'preselected' if row.preselected else '' }}"
+           id="tl-seg-{{ seg.id }}"
+           data-segment-id="{{ seg.id }}"
+           title="{{ (seg.confidence * 100) | round(0) | int }}% Konfidenz">
+        <div class="handle handle-left" data-edge="start"></div>
+        <div class="segment-label">{{ (seg.confidence * 100) | round(0) | int }}%</div>
+        <div class="handle handle-right" data-edge="end"></div>
+      </div>
+      {% endfor %}
+      <div class="timeline-playhead" id="playhead"></div>
+    </div>
+  </div>
+  <p class="muted small">Ziehe die Ränder eines erkannten Bereichs, um ihn zu verkleinern oder zu vergrößern. Klicke auf die Zeitleiste, um im Player zu springen.</p>
+</div>
+
+<form method="post" action="/episodes/{{ episode.id }}/apply-cut" id="review-form">
+  <table>
+    <thead>
+      <tr>
+        <th>Übernehmen</th><th>Start</th><th>Ende</th><th>Konfidenz</th>
+        <th>Erkannt durch</th><th>Transkript-Ausschnitt</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in segment_rows %}
+      {% set seg = row.segment %}
+      <tr class="segment-row" data-segment-id="{{ seg.id }}">
+        <td><input type="checkbox" name="seg_accept_{{ seg.id }}" class="seg-accept" {% if row.preselected %}checked{% endif %}></td>
+        <td>
+          <input type="text" class="mmss-input seg-start-display" value="{{ seg.start_ms | mmss }}" inputmode="numeric" size="5">
+          <input type="hidden" name="seg_start_{{ seg.id }}" class="seg-start-seconds" value="{{ (seg.start_ms / 1000) | round(1) }}">
+        </td>
+        <td>
+          <input type="text" class="mmss-input seg-end-display" value="{{ seg.end_ms | mmss }}" inputmode="numeric" size="5">
+          <input type="hidden" name="seg_end_{{ seg.id }}" class="seg-end-seconds" value="{{ (seg.end_ms / 1000) | round(1) }}">
+        </td>
+        <td><span class="badge {{ seg.confidence | conf_class }}">{{ (seg.confidence * 100) | round(0) | int }}%</span></td>
+        <td>
+          {% for kw in row.keywords %}<span class="chip chip-keyword">{{ kw }}</span>{% endfor %}
+          {% for jg in row.jingles %}<span class="chip chip-jingle">Jingle: {{ jg }}</span>{% endfor %}
+          {% if seg.is_duplicate_match %}<span class="chip chip-duplicate" title="Akustisch identisch mit der vorherigen Episode">Duplikat</span>{% endif %}
+        </td>
+        <td class="muted">{{ seg.transcript_snippet }}</td>
+        <td><button type="button" class="secondary preview-btn" data-start="{{ seg.start_ms / 1000 }}">Vorhören</button></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="muted">Keine Kandidaten gefunden.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h3>Manuell hinzufügen</h3>
+  <div id="manual-rows"></div>
+  <button type="button" id="add-manual-row" class="secondary">+ Segment hinzufügen</button>
+
+  <div style="margin-top:1rem;">
+    <button type="submit">Schneiden &amp; veröffentlichen</button>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/timeline.js"></script>
+<script src="/static/js/review.js"></script>
+{% endblock %}

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/">&larr; Alle Feeds</a></p>
+<h1>{{ feed.title }}</h1>
+<p class="muted">{{ feed.original_rss_url }}</p>
+<p>
+  <span class="badge {{ 'published' if feed.auto_cut else 'pending_review' }}">
+    {{ "Auto-Cut" if feed.auto_cut else "Manuelle Review" }}
+  </span>
+  <span class="muted">&middot; Eigener Feed: <a href="/feed/{{ feed.id }}.xml">/feed/{{ feed.id }}.xml</a></span>
+</p>
+
+<div class="flex" style="margin: 0.75rem 0;">
+  <form method="post" action="/feeds/{{ feed.id }}/refresh"><button class="secondary">Jetzt aktualisieren</button></form>
+  <form method="post" action="/feeds/{{ feed.id }}/toggle-auto-cut"><button class="secondary">Auto-Cut umschalten</button></form>
+</div>
+
+<div class="card" style="margin-bottom: 1rem;">
+  <h3>Auto-Cut-Schwelle</h3>
+  <p class="muted small">
+    Segmente mit einer Konfidenz ab dieser Schwelle werden im Auto-Cut-Modus automatisch entfernt.
+    Nur relevant, solange der Feed auf Auto-Cut steht.
+  </p>
+  <form method="post" action="/feeds/{{ feed.id }}/update-threshold">
+    <div class="flex">
+      <label>Schwelle
+        <input type="number" step="0.05" min="0" max="1" name="confidence_threshold"
+               value="{{ feed.confidence_threshold if feed.confidence_threshold is not none else '' }}"
+               placeholder="{{ default_threshold }}">
+      </label>
+      <button type="submit">Speichern</button>
+    </div>
+    <p class="muted small">Leer lassen = globaler Standard ({{ default_threshold }}).</p>
+  </form>
+</div>
+
+<table>
+  <thead>
+    <tr><th>Episode</th><th>Veröffentlicht</th><th>Status</th><th>Aktionen</th></tr>
+  </thead>
+  <tbody>
+  {% for ep in episodes %}
+    <tr>
+      <td>{{ ep.title }}</td>
+      <td>{{ ep.pubdate.strftime("%Y-%m-%d") if ep.pubdate else "" }}</td>
+      <td><span class="badge {{ ep.status }}">{{ ep.status }}</span>
+        {% if ep.error_message %}<div class="muted">{{ ep.error_message }}</div>{% endif %}
+      </td>
+      <td>
+        {% if ep.status == "pending_review" %}
+          <a href="/episodes/{{ ep.id }}/review"><button>Review</button></a>
+        {% elif ep.status == "published" and ep.processed_audio_path %}
+          <audio controls src="/media/audio/processed/{{ ep.processed_audio_path | basename }}"></audio>
+          <div style="margin-top:0.4rem;">
+            <form method="post" action="/episodes/{{ ep.id }}/delete-audio" style="display:inline;"
+                  onsubmit="return confirm('Heruntergeladene Audiodaten dieser Episode wirklich löschen? Sie kann jederzeit erneut heruntergeladen werden.');">
+              <button type="submit" class="danger" title="Lokale Audiodateien löschen, um Speicherplatz freizugeben">Löschen</button>
+            </form>
+          </div>
+        {% elif ep.status == "published" %}
+          <span class="muted">Audio nicht mehr im Cache</span>
+          <div style="margin-top:0.4rem;">
+            <form method="post" action="/episodes/{{ ep.id }}/reprocess">
+              <button type="submit" title="Episode erneut vom Original-Feed herunterladen">Herunterladen</button>
+            </form>
+          </div>
+        {% elif ep.status.startswith("failed_") or ep.status == "error_permanent" %}
+          <form method="post" action="/episodes/{{ ep.id }}/retry"><button class="secondary">Retry</button></form>
+        {% elif ep.status == "reanalyze" %}
+          <span class="muted">wartet auf Neuanalyse…</span>
+        {% else %}
+          <span class="muted">wird verarbeitet…</span>
+        {% endif %}
+        {% if ep.status == "pending_review" or (ep.status == "published" and ep.processed_audio_path) %}
+          <form method="post" action="/episodes/{{ ep.id }}/reprocess" style="margin-top:0.4rem;">
+            <button type="submit" class="secondary" title="Erneut analysieren, z. B. nach neuen Jingles">Neu analysieren</button>
+          </form>
+        {% endif %}
+
+        {% if ep.correction_status %}
+        <div class="card" style="margin-top:0.5rem; padding:0.6rem 0.75rem;">
+          <div class="flex" style="justify-content:space-between;">
+            <span class="badge {{ 'conf-high' if ep.correction_status == 'ready' else 'conf-medium' if ep.correction_status == 'failed' else 'new' }}">
+              Korrektur: {{ ep.correction_status }}
+            </span>
+          </div>
+          <p class="muted small">Der Podcaster hat die Audiodatei dieser Episode ausgetauscht.
+            Das Original bleibt unangetastet, solange die Korrektur nicht übernommen wird.</p>
+          {% if ep.correction_status == "ready" %}
+            <audio controls src="/media/audio/processed/{{ ep.id }}_correction.mp3"></audio>
+            <div class="flex" style="margin-top:0.4rem;">
+              <form method="post" action="/episodes/{{ ep.id }}/apply-correction">
+                <button type="submit">Korrektur übernehmen</button>
+              </form>
+              <form method="post" action="/episodes/{{ ep.id }}/discard-correction">
+                <button type="submit" class="danger">Verwerfen</button>
+              </form>
+            </div>
+          {% elif ep.correction_status == "failed" %}
+            <p class="muted">{{ ep.correction_error_message }}</p>
+            <form method="post" action="/episodes/{{ ep.id }}/discard-correction">
+              <button type="submit" class="secondary">Verwerfen</button>
+            </form>
+          {% else %}
+            <p class="muted small">wird verarbeitet…</p>
+          {% endif %}
+        </div>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">Noch keine Episoden.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

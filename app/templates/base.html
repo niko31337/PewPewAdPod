@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PewPewAdPod{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/img/logo-icon.svg">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <nav>
+    <a href="/" class="brand">
+      <img src="/static/img/logo-icon.svg" alt="" class="brand-icon">
+      <img src="/static/img/logo-wordmark.svg" alt="PewPewAdPod" class="brand-wordmark">
+    </a>
+    <div class="nav-links">
+      <a href="/jingle-finder">Jingle Finder</a>
+      <a href="/config">Einstellungen</a>
+    </div>
+  </nav>
+  <hr>
+  {% block content %}{% endblock %}
+  <script src="/static/js/progress.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

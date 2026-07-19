@@ -1,0 +1,77 @@
+keywords:
+  - {phrase: "gesponsert von", lang: de, weight: 1.0}
+  - {phrase: "Vanta", lang: de, weight: 1.0}
+  - {phrase: "werbung", lang: de, weight: 0.6}
+  - {phrase: "rabattcode", lang: de, weight: 0.9}
+  - {phrase: "unterstützt von", lang: de, weight: 0.8}
+  - {phrase: "diese folge wird", lang: de, weight: 0.7}
+  - {phrase: "brought to you by", lang: en, weight: 1.0}
+  - {phrase: "promo code", lang: en, weight: 0.9}
+  - {phrase: "use code", lang: en, weight: 0.8}
+  - {phrase: "% off", lang: en, weight: 0.6}
+  - {phrase: "sponsored by", lang: en, weight: 1.0}
+  - {phrase: "this episode is sponsored", lang: en, weight: 1.0}
+  - {phrase: "Diese Folge wird euch präsentiert von", lang: de, weight: 1.0}
+  
+
+window:
+  pre_context_seconds: 5
+  post_context_seconds: 45
+  max_block_seconds: 90
+  merge_gap_seconds: 5
+
+scoring:
+  keyword_weight: 0.35
+  jingle_weight: 0.45
+  acoustic_weight: 0.2
+  silence_snap_bonus: 0.15
+  rms_jump_bonus: 0.15
+  keyword_normalization: 1.5
+  auto_cut_default_threshold: 0.75
+
+silence:
+  min_silence_len_ms: 500
+  silence_thresh_offset_db: -16
+  search_radius_ms: 5000
+
+rms:
+  context_seconds: 10
+  jump_threshold_db: 3.0
+
+# Jingle-/Audio-Fingerprint-Erkennung: mp3-Schnipsel in app/config/ad_jingles/
+# werden per normalisierter Kreuzkorrelation im Episoden-Audio gesucht.
+# Optionale Namenskonvention für die Rolle eines Jingles: "*start*"/"*beginn*"
+# im Dateinamen = markiert den Werbeblock-Beginn, "*end*"/"*ende*" = das Ende,
+# alles andere wird als generischer Marker behandelt (symmetrisches Fenster).
+jingles:
+  target_sample_rate: 4000
+  match_threshold: 0.6
+  confident_threshold: 0.8
+  min_pair_gap_seconds: 8
+  max_pair_gap_seconds: 1200
+  default_block_seconds: 45
+
+# Jede Analyse vergleicht das Episoden-Audio zusätzlich per Fingerprint (wie im Jingle
+# Finder) gegen die vorherige Episode desselben Feeds. Abschnitte, die in beiden Episoden
+# akustisch identisch sind, können unmöglich einzigartiger gesprochener Inhalt sein (Intro,
+# Outro, unveränderter Werbeblock) und bekommen daher eine sehr hohe Mindest-Konfidenz.
+# min_duplicate_seconds: a matched span shorter than this is very often a spurious
+# hash collision (a few coincidentally-matching spectral peaks) rather than a genuinely
+# reused segment - real intros/outros/ad reads run several seconds at least. Can be
+# overridden per-installation on the Config page (AppConfig.min_duplicate_seconds).
+duplicates:
+  min_support: 12
+  min_duplicate_seconds: 2.0
+  max_duplicate_seconds: 300
+  confidence_floor_base: 0.85
+  confidence_floor_max: 1.0
+  support_normalize: 300
+  # A duplicate spanning this many seconds (or more) gets full confidence-floor credit
+  # from duration alone; duration counts 4x as much as the support-count fraction below.
+  duration_normalize_seconds: 10.0
+  # Fingerprint-Kollisionen schlagen Kandidaten nur VOR. Jeder Kandidat wird danach auf
+  # der echten Wellenform verifiziert (Kreuzkorrelation eines Ausschnitts gegen die
+  # Vorgänger-Episode an der vorhergesagten Position). Wirklich wiederverwendetes Audio
+  # korreliert nahe 1.0, zufällige Kollisions-Häufungen (ähnliche Stimmen/Musikbett)
+  # nahe 0. Kandidaten unterhalb dieser Schwelle werden komplett verworfen.
+  verify_correlation_threshold: 0.6

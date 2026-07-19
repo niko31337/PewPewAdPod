@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+sqlmodel
+apscheduler
+feedparser
+httpx
+faster-whisper
+pydub
+audioop-lts; python_version >= "3.13"
+feedgen
+pydantic-settings
+pyyaml
+mutagen
+numpy
+Pillow

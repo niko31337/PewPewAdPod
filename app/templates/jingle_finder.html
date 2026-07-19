@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Jingle Finder</h1>
+<p class="muted">Findet oder erstellt Werbe-Jingles für die automatische Erkennung (landen in <code>app/config/ad_jingles/</code>).</p>
+
+{% if error %}
+<div class="card" style="border-color: var(--danger);">
+  <p style="color: var(--danger); margin:0;">{{ error }}</p>
+  {% if low_episode_feed %}
+  <form method="post" action="/jingle-finder/download-next" data-loading-text="Lade nächste Folge herunter…" style="margin-top:0.75rem;">
+    <input type="hidden" name="feed_id" value="{{ low_episode_feed.id }}">
+    <button type="submit" class="secondary">Nächste Folge von "{{ low_episode_feed.title }}" herunterladen</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+{% if saved %}
+<div class="card" style="border-color: var(--success);"><p style="color: var(--success); margin:0;">Jingle gespeichert: {{ saved }}</p></div>
+{% endif %}
+{% if downloaded %}
+<div class="card" style="border-color: var(--success);"><p style="color: var(--success); margin:0;">Episode heruntergeladen: {{ downloaded }} — jetzt "Analysieren" erneut versuchen.</p></div>
+{% endif %}
+
+<div class="card">
+  <h3>Automatischer Modus</h3>
+  <p class="muted">Vergleicht die zwei neuesten lokal vorhandenen Episoden eines Feeds und schlägt
+    wiederkehrende Abschnitte (mögliche Jingles) zum Extrahieren vor. Dauert je nach Episodenlänge
+    bis zu einer Minute.</p>
+  <form method="post" action="/jingle-finder/auto" class="flex" data-loading-text="Analysiere Episoden…">
+    <select name="feed_id" required>
+      {% for feed in feeds %}<option value="{{ feed.id }}">{{ feed.title }}</option>{% endfor %}
+    </select>
+    <button type="submit">Analysieren</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Manueller Modus</h3>
+  <p class="muted">Lädt die neueste Episode eines Feeds; du wählst per Maus einen Bereich auf der
+    Zeitleiste aus und speicherst ihn als Jingle.</p>
+  <form method="get" action="/jingle-finder/manual" class="flex">
+    <select name="feed_id" required>
+      {% for feed in feeds %}<option value="{{ feed.id }}">{{ feed.title }}</option>{% endfor %}
+    </select>
+    <button type="submit">Episode laden</button>
+  </form>
+</div>
+{% endblock %}

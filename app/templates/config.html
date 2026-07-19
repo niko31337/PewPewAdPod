@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Einstellungen</h1>
+
+<div class="card">
+  <h3>Episoden-Cache</h3>
+  <p class="muted">
+    Steuert, wie viele heruntergeladene/veröffentlichte Episoden lokal vorgehalten werden.
+    Wird ein Limit überschritten, wird jeweils die älteste gecachte Episode über alle Feeds
+    hinweg entfernt (Original- und geschnittene Audiodatei) — es bleibt aber immer mindestens
+    eine Episode pro Feed erhalten. Die Episode bleibt in der Historie sichtbar, verschwindet
+    aber aus dem veröffentlichten RSS-Feed, sobald ihre Audiodatei gelöscht wurde.
+  </p>
+  <form method="post" action="/config">
+    <div class="flex" style="margin-bottom:0.75rem;">
+      <label>Max. Episoden pro Feed
+        <input type="number" min="1" name="max_episodes_per_feed"
+               value="{{ config.max_episodes_per_feed if config.max_episodes_per_feed is not none else '' }}"
+               placeholder="unbegrenzt">
+      </label>
+      <label>Max. Cache-Größe (MB)
+        <input type="number" min="1" step="1" name="max_cache_size_mb"
+               value="{{ config.max_cache_size_mb | int if config.max_cache_size_mb is not none else '' }}"
+               placeholder="unbegrenzt">
+      </label>
+    </div>
+    <p class="muted small">Leer lassen = kein Limit.</p>
+
+    <div class="flex" style="margin-bottom:0.75rem;">
+      <label>Mindestlänge für Duplikat-Erkennung (Sekunden)
+        <input type="number" min="0" step="0.5" name="min_duplicate_seconds"
+               value="{{ config.min_duplicate_seconds if config.min_duplicate_seconds is not none else '' }}"
+               placeholder="{{ default_min_duplicate_seconds }}">
+      </label>
+    </div>
+    <p class="muted small">
+      Übereinstimmungen mit der Vorgänger-Episode, die kürzer sind als dieser Wert, gelten nicht
+      als Duplikat (kurze Treffer sind meist Zufall, keine echten Wiederholungen wie Intro/Outro
+      oder unveränderte Werbeblöcke). Leer lassen = Standard ({{ default_min_duplicate_seconds }}s).
+    </p>
+    <button type="submit">Speichern</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Aktueller Cache-Stand</h3>
+  <p>{{ summary.total_episodes }} gecachte Episode(n), insgesamt {{ summary.total_mb | round(1) }} MB</p>
+  <table>
+    <thead><tr><th>Feed</th><th>Gecachte Episoden</th></tr></thead>
+    <tbody>
+    {% for row in per_feed %}
+      <tr><td>{{ row.feed_title }}</td><td>{{ row.count }}</td></tr>
+    {% else %}
+      <tr><td colspan="2" class="muted">Keine gecachten Episoden.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

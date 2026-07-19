@@ -1,0 +1,12 @@
+services:
+  pewpewadpod:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mounted (not named volumes) so the sqlite DB, cached audio, cover art and
+      # your jingle library live in plain folders next to this file - same layout as
+      # running the app locally without Docker, easy to inspect/back up directly.
+      - ./data:/app/data
+      - ./app/config/ad_jingles:/app/app/config/ad_jingles
+    restart: unless-stopped

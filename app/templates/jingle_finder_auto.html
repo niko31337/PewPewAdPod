@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/jingle-finder">&larr; Jingle Finder</a></p>
+<h1>Automatischer Modus: {{ feed.title }}</h1>
+<p class="muted">Vergleich zwischen "{{ episode_a.title }}" und "{{ episode_b.title }}".
+  Zeitangaben und Vorhören beziehen sich auf die erste Episode.</p>
+
+<div class="card">
+  <audio id="player" controls src="/media/audio/originals/{{ episode_a.id }}.mp3"></audio>
+
+  <div class="timeline-wrap">
+    <div class="timeline" id="timeline" data-duration-ms="{{ duration_ms }}">
+      <div class="timeline-ruler" id="timeline-ruler"></div>
+      {% for c in candidates %}
+      <div class="timeline-segment conf-high" id="tl-cand-{{ loop.index0 }}" data-index="{{ loop.index0 }}">
+        <div class="handle handle-left" data-edge="start"></div>
+        <div class="segment-label">{{ loop.index }}</div>
+        <div class="handle handle-right" data-edge="end"></div>
+      </div>
+      {% endfor %}
+      <div class="timeline-playhead" id="playhead"></div>
+    </div>
+  </div>
+  <p class="muted small">Ziehe die Ränder eines Vorschlags, um den Bereich vor dem Speichern anzupassen.</p>
+</div>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Start</th><th>Ende</th><th>Übereinstimmung</th><th>Dateiname</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for c in candidates %}
+  <tr class="candidate-row" data-index="{{ loop.index0 }}">
+    <td>{{ loop.index }}</td>
+    <td><input type="text" class="mmss-input cand-start-display" value="{{ (c.start_a_s * 1000) | mmss }}"></td>
+    <td><input type="text" class="mmss-input cand-end-display" value="{{ (c.end_a_s * 1000) | mmss }}"></td>
+    <td class="muted">{{ c.support }} Landmarken</td>
+    <td>
+      <form method="post" action="/jingle-finder/extract" class="flex extract-form">
+        <input type="hidden" name="episode_id" value="{{ episode_a.id }}">
+        <input type="hidden" name="start_s" class="cand-start-seconds" value="{{ c.start_a_s | round(2) }}">
+        <input type="hidden" name="end_s" class="cand-end-seconds" value="{{ c.end_a_s | round(2) }}">
+        <input type="text" name="filename" size="20"
+               value="{{ feed.title | lower | replace(' ', '_') | replace('-', '_') }}_{{ loop.index }}.mp3">
+        <button type="submit">Speichern</button>
+        <button type="button" class="secondary preview-btn" data-start="{{ c.start_a_s }}">Vorhören</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">Keine wiederkehrenden Abschnitte gefunden.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/timeline.js"></script>
+<script src="/static/js/jingle_finder.js"></script>
+{% endblock %}

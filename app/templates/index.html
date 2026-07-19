@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Feeds</h1>
+
+<div class="card">
+  <div class="flex" style="justify-content:space-between;">
+    <div>
+      <h3>Nikos pewpewadpod Feed</h3>
+      <p class="muted">Sammelfeed mit der jeweils neuesten, werbefreien Episode aus allen hinterlegten
+        Podcasts. Episoden-Artwork trägt zusätzlich das PewPewAdPod-Logo als Wasserzeichen.</p>
+      <div class="muted">Feed-URL: <a href="/feed/master.xml">/feed/master.xml</a></div>
+    </div>
+    <img src="/media/covers/master/cover.jpg" alt="" style="width:64px;height:64px;border-radius:6px;object-fit:cover;">
+  </div>
+</div>
+
+<div class="card">
+  <h3>Neuen Feed hinzufügen</h3>
+  <form method="post" action="/feeds">
+    <div class="flex" style="margin-bottom:0.5rem;">
+      <input type="url" name="rss_url" placeholder="https://beispiel.de/podcast/feed.xml" required style="flex:1;">
+    </div>
+    <div class="flex" style="margin-bottom:0.5rem;">
+      <label class="flex"><input type="checkbox" name="auto_cut" value="true"> Auto-Cut (sonst manuelle Review)</label>
+      <label class="flex">Schwelle (optional):
+        <input type="number" step="0.05" min="0" max="1" name="confidence_threshold" placeholder="0.75">
+      </label>
+    </div>
+    <button type="submit">Feed hinzufügen</button>
+  </form>
+</div>
+
+{% for feed in feeds %}
+<div class="card">
+  <div class="flex" style="justify-content:space-between;">
+    <div>
+      <h3><a href="/feeds/{{ feed.id }}">{{ feed.title }}</a></h3>
+      <div class="muted">{{ feed.original_rss_url }}</div>
+      <div style="margin: 0.3rem 0;">
+        <span class="badge {{ 'published' if feed.auto_cut else 'pending_review' }}">
+          {{ "Auto-Cut" if feed.auto_cut else "Manuelle Review" }}
+        </span>
+        {% if feed.auto_cut %}
+          <span class="muted small">Schwelle {{ feed.confidence_threshold if feed.confidence_threshold is not none else default_threshold }}</span>
+        {% endif %}
+      </div>
+      <div class="muted">Eigener Feed: <a href="/feed/{{ feed.id }}.xml">/feed/{{ feed.id }}.xml</a></div>
+    </div>
+    {% if feed.cover_image_local_path %}
+    <img src="/media/covers/{{ feed.id }}/cover.jpg" alt="" style="width:64px;height:64px;border-radius:6px;object-fit:cover;">
+    {% endif %}
+  </div>
+  <div class="flex" style="margin-top:0.5rem;">
+    <form method="post" action="/feeds/{{ feed.id }}/refresh"><button class="secondary">Jetzt aktualisieren</button></form>
+    <form method="post" action="/feeds/{{ feed.id }}/toggle-auto-cut"><button class="secondary">Auto-Cut umschalten</button></form>
+    <form method="post" action="/feeds/{{ feed.id }}/delete" onsubmit="return confirm('Feed wirklich löschen?');"><button class="danger">Löschen</button></form>
+  </div>
+</div>
+{% else %}
+<p class="muted">Noch keine Feeds hinterlegt.</p>
+{% endfor %}
+{% endblock %}
