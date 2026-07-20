@@ -90,6 +90,7 @@ def persist_ad_segments(
             status=SegmentStatus.PENDING,
             is_correction=is_correction,
             is_duplicate_match=c.duplicate_confidence > 0,
+            is_beat_match=c.beat_score > 0,
         )
         session.add(row)
         rows.append(row)

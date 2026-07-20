@@ -8,7 +8,8 @@ from pydub import AudioSegment
 from pydub.silence import detect_silence
 from sqlmodel import Session
 
-from app.services import cache_manager, fingerprint, jingle_detector
+from app.services import beat_detector, cache_manager, fingerprint, jingle_detector
+from app.services.beat_detector import BeatWindow
 from app.services.jingle_detector import JingleHit
 from app.services.transcriber import TranscriptSegment
 
@@ -33,6 +34,7 @@ class Candidate:
     acoustic_score: float = 0.0
     duplicate_confidence: float = 0.0
     duplicate_support: int = 0
+    beat_score: float = 0.0
     confidence: float = 0.0
     silence_snapped: bool = False
     rms_jump_db: float = 0.0
@@ -64,6 +66,7 @@ class ScoringConfig:
     rms_jump_bonus: float
     keyword_normalization: float
     auto_cut_default_threshold: float
+    beat_weight: float = 0.3
 
 
 @dataclass
@@ -102,6 +105,24 @@ class DuplicateConfig:
 
 
 @dataclass
+class BeatConfig:
+    target_sample_rate: int = 8000
+    frame_size: int = 512
+    hop_size: int = 128
+    low_hz: float = 50.0
+    high_hz: float = 150.0
+    window_seconds: float = 4.0
+    step_seconds: float = 2.0
+    bpm_min: float = 60.0
+    bpm_max: float = 180.0
+    min_periodicity: float = 0.55
+    min_bass_rms: float = 3.0
+    min_beat_seconds: float = 8.0
+    min_consecutive_windows: int = 3
+    max_period_relative_deviation: float = 0.15
+
+
+@dataclass
 class DetectorConfig:
     keywords: list[KeywordConfig]
     window: WindowConfig
@@ -110,6 +131,7 @@ class DetectorConfig:
     rms: RmsConfig
     jingles: JingleConfig
     duplicates: DuplicateConfig
+    beat: BeatConfig = field(default_factory=BeatConfig)
 
 
 def load_keyword_config(path: Path) -> DetectorConfig:
@@ -122,6 +144,7 @@ def load_keyword_config(path: Path) -> DetectorConfig:
         rms=RmsConfig(**raw["rms"]),
         jingles=JingleConfig(**raw["jingles"]),
         duplicates=DuplicateConfig(**raw["duplicates"]),
+        beat=BeatConfig(**raw["beat"]) if "beat" in raw else BeatConfig(),
     )
 
 
@@ -190,6 +213,7 @@ def merge_candidates(candidates: list[Candidate], merge_gap_ms: int) -> list[Can
             if cur.duplicate_confidence > last.duplicate_confidence:
                 last.duplicate_confidence = cur.duplicate_confidence
                 last.duplicate_support = cur.duplicate_support
+            last.beat_score = max(last.beat_score, cur.beat_score)
             last.source = "merged"
         else:
             merged.append(cur)
@@ -270,7 +294,8 @@ def score_candidate(
         1.0,
         keyword_score * scoring.keyword_weight
         + jingle_score * scoring.jingle_weight
-        + acoustic_score * scoring.acoustic_weight,
+        + acoustic_score * scoring.acoustic_weight
+        + candidate.beat_score * scoring.beat_weight,
     )
 
     # A *paired* jingle match (the same or a start/end jingle bracketing the block from
@@ -376,6 +401,58 @@ def build_candidates_from_duplicate_matches(
     return candidates
 
 
+def build_candidates_from_beat_windows(
+    windows: list[BeatWindow], beat_cfg: BeatConfig, audio_duration_s: float
+) -> list[Candidate]:
+    """Some podcasters run a steady background beat under sponsor reads that isn't
+    present in the rest of the episode. Consecutive windows are merged into candidate
+    blocks only if they (a) clear the periodicity and a minimum absolute bass loudness
+    (so a quiet passage's noise floor can't look "periodic" by chance), AND (b) agree on
+    close to the *same* beat period as their neighbors. That second check is what tells
+    a genuinely looping music bed apart from a rhythmic burst that isn't one - a deep
+    laugh's "ha-ha-ha" can score high periodicity in a single window too, but it decays
+    and its pulse spacing drifts, so it won't hold a matching period across several
+    consecutive windows the way an actual loop does. Independent of keywords or known
+    jingles, so it still catches ad reads Whisper mis-transcribed entirely."""
+    hits = [
+        w for w in windows if w.periodicity >= beat_cfg.min_periodicity and w.bass_rms >= beat_cfg.min_bass_rms
+    ]
+    if not hits:
+        return []
+    hits.sort(key=lambda w: w.start_s)
+
+    spans: list[list[BeatWindow]] = [[hits[0]]]
+    for w in hits[1:]:
+        prev = spans[-1][-1]
+        adjacent = w.start_s - prev.end_s <= beat_cfg.step_seconds
+        period_matches = (
+            prev.period_s > 0
+            and abs(w.period_s - prev.period_s) <= beat_cfg.max_period_relative_deviation * prev.period_s
+        )
+        if adjacent and period_matches:
+            spans[-1].append(w)
+        else:
+            spans.append([w])
+
+    candidates: list[Candidate] = []
+    for span in spans:
+        if len(span) < beat_cfg.min_consecutive_windows:
+            continue
+        start_s = max(0.0, span[0].start_s)
+        end_s = min(audio_duration_s, span[-1].end_s)
+        if end_s - start_s < beat_cfg.min_beat_seconds:
+            continue
+        candidates.append(
+            Candidate(
+                start_ms=int(start_s * 1000),
+                end_ms=int(end_s * 1000),
+                beat_score=max(w.periodicity for w in span),
+                source="beat",
+            )
+        )
+    return candidates
+
+
 def _build_transcript_snippet(segments: list[TranscriptSegment], start_s: float, end_s: float) -> str:
     parts = [s.text.strip() for s in segments if s.end >= start_s and s.start <= end_s]
     snippet = " ".join(parts).strip()
@@ -439,8 +516,27 @@ def detect_ad_segments(
                 exc_info=True,
             )
 
+    beat_candidates: list[Candidate] = []
+    try:
+        beat_windows = beat_detector.find_beat_windows(
+            audio_path,
+            target_sample_rate=config.beat.target_sample_rate,
+            frame_size=config.beat.frame_size,
+            hop_size=config.beat.hop_size,
+            low_hz=config.beat.low_hz,
+            high_hz=config.beat.high_hz,
+            window_seconds=config.beat.window_seconds,
+            step_seconds=config.beat.step_seconds,
+            bpm_min=config.beat.bpm_min,
+            bpm_max=config.beat.bpm_max,
+        )
+        beat_candidates = build_candidates_from_beat_windows(beat_windows, config.beat, audio_duration_s)
+    except Exception:
+        log.warning("Could not run background-beat detection for %s", audio_path, exc_info=True)
+
     candidates = merge_candidates(
-        jingle_candidates + keyword_candidates + duplicate_candidates, int(config.window.merge_gap_seconds * 1000)
+        jingle_candidates + keyword_candidates + duplicate_candidates + beat_candidates,
+        int(config.window.merge_gap_seconds * 1000),
     )
     if not candidates:
         return []
@@ -453,7 +549,12 @@ def detect_ad_segments(
             transcript, candidate.start_ms / 1000.0, candidate.end_ms / 1000.0
         )
         signal_count = sum(
-            [bool(candidate.jingle_hits), bool(candidate.keyword_hits), candidate.duplicate_confidence > 0]
+            [
+                bool(candidate.jingle_hits),
+                bool(candidate.keyword_hits),
+                candidate.duplicate_confidence > 0,
+                candidate.beat_score > 0,
+            ]
         )
         if signal_count > 1:
             candidate.source = "merged"
@@ -461,6 +562,8 @@ def detect_ad_segments(
             candidate.source = "duplicate"
         elif candidate.jingle_hits:
             candidate.source = "jingle"
+        elif candidate.beat_score > 0:
+            candidate.source = "beat"
         else:
             candidate.source = "merged" if len(candidate.keyword_hits) > 1 else "keyword"
 

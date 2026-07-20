@@ -75,3 +75,30 @@ duplicates:
   # korreliert nahe 1.0, zufällige Kollisions-Häufungen (ähnliche Stimmen/Musikbett)
   # nahe 0. Kandidaten unterhalb dieser Schwelle werden komplett verworfen.
   verify_correlation_threshold: 0.6
+
+# Manche Podcasts spielen während gesprochener Werbung einen gleichmäßigen Hintergrund-
+# Beat, der im redaktionellen Teil fehlt. Erkennung unabhängig vom Transkript: die
+# Energie im Bass-Band (low_hz-high_hz) wird pro Zeitfenster autokorreliert - ein
+# steter Puls im bpm_min-bpm_max-Bereich ergibt einen hohen Periodizitäts-Score,
+# reine Sprache/Stille nicht. min_bass_rms verhindert, dass eine leise Passage allein
+# durch Rauschen als "periodisch" durchgeht.
+# Ein einzelnes Fenster mit hoher Periodizität reicht NICHT - z.B. kann ein tiefes,
+# bassbetontes Lachen ("ha-ha-ha") in einem einzelnen Fenster ebenfalls periodisch
+# wirken. Erst wenn min_consecutive_windows aufeinanderfolgende Fenster nahezu
+# denselben Takt (period_s, Toleranz max_period_relative_deviation) zeigen, gilt es als
+# echter, durchlaufender Musik-Loop statt als kurzer rhythmischer Ausreißer.
+beat:
+  target_sample_rate: 8000
+  frame_size: 512
+  hop_size: 128
+  low_hz: 50.0
+  high_hz: 150.0
+  window_seconds: 4.0
+  step_seconds: 2.0
+  bpm_min: 60.0
+  bpm_max: 180.0
+  min_periodicity: 0.55
+  min_bass_rms: 3.0
+  min_beat_seconds: 8.0
+  min_consecutive_windows: 3
+  max_period_relative_deviation: 0.15

@@ -38,6 +38,7 @@ class SegmentSource(str, Enum):
     MANUAL = "manual"
     JINGLE = "jingle"
     DUPLICATE = "duplicate"
+    BEAT = "beat"
 
 
 class CorrectionStatus(str, Enum):
@@ -125,6 +126,7 @@ class AdSegment(SQLModel, table=True):
     status: str = SegmentStatus.PENDING
     is_correction: bool = False
     is_duplicate_match: bool = False  # found identical in the previous episode's audio too
+    is_beat_match: bool = False  # steady background beat detected under this segment
     created_at: datetime = Field(default_factory=utcnow)
 
 

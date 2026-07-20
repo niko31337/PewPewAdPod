@@ -53,6 +53,7 @@
           {% for kw in row.keywords %}<span class="chip chip-keyword">{{ kw }}</span>{% endfor %}
           {% for jg in row.jingles %}<span class="chip chip-jingle">Jingle: {{ jg }}</span>{% endfor %}
           {% if seg.is_duplicate_match %}<span class="chip chip-duplicate" title="Akustisch identisch mit der vorherigen Episode">Duplikat</span>{% endif %}
+          {% if seg.is_beat_match %}<span class="chip chip-beat" title="Gleichmäßiger Hintergrund-Beat erkannt">Beat</span>{% endif %}
         </td>
         <td class="muted">{{ seg.transcript_snippet }}</td>
         <td><button type="button" class="secondary preview-btn" data-start="{{ seg.start_ms / 1000 }}">Vorhören</button></td>
