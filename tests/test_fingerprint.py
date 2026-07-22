@@ -1,6 +1,12 @@
 import numpy as np
 
-from app.services.fingerprint import MatchCandidate, _verify_candidate, find_repeated_segments_in_samples
+import app.services.fingerprint as fingerprint_module
+from app.services.fingerprint import (
+    MatchCandidate,
+    _spectrogram_peaks,
+    _verify_candidate,
+    find_repeated_segments_in_samples,
+)
 
 SR = 5000
 
@@ -129,3 +135,40 @@ def test_find_repeated_segments_attaches_correlation_to_survivors():
 
     assert candidates
     assert all(c.correlation >= 0.6 for c in candidates)
+
+
+def test_spectrogram_peaks_chunking_matches_a_single_unchunked_pass(monkeypatch):
+    # A multi-hour episode makes _spectrogram_peaks allocate a huge array if it windows
+    # every frame at once - this is what actually crashed the container when comparing
+    # two multi-hour episodes for duplicate segments. Chunking must produce the exact
+    # same per-frame peaks regardless of chunk size.
+    signal = _tone_burst(3.0) + _white_noise(3.0, seed=13) * 0.05
+
+    monkeypatch.setattr(fingerprint_module, "_SPECTROGRAM_CHUNK_FRAMES", 10_000_000)
+    unchunked = _spectrogram_peaks(signal, frame_size=256, hop_size=128, num_peaks=3)
+
+    monkeypatch.setattr(fingerprint_module, "_SPECTROGRAM_CHUNK_FRAMES", 29)
+    chunked = _spectrogram_peaks(signal, frame_size=256, hop_size=128, num_peaks=3)
+
+    assert len(chunked) == len(unchunked) > 100  # sanity: spans several chunk boundaries
+    assert chunked == unchunked
+
+
+def test_spectrogram_peaks_memory_does_not_scale_with_episode_length():
+    import tracemalloc
+
+    def _peak_memory_for(duration_s: float) -> int:
+        signal = np.zeros(int(duration_s * SR), dtype=np.float32)
+        tracemalloc.start()
+        _spectrogram_peaks(signal, frame_size=1024, hop_size=512, num_peaks=3)
+        _current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        return peak
+
+    peak_1h = _peak_memory_for(3600)
+    peak_6h = _peak_memory_for(6 * 3600)
+
+    # Unchunked, peak memory is proportional to frame_count (i.e. to duration), so 6h
+    # would need ~6x the memory of 1h. Chunked, peak memory is bounded by chunk size
+    # regardless of how many chunks there are - it should barely move.
+    assert peak_6h < peak_1h * 1.5

@@ -1,13 +1,14 @@
 import asyncio
+import logging
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.config import BASE_DIR, settings
-from app.database import init_db
+from app.database import init_db, session_scope
 from app.logging_conf import setup_logging
 from app.routers import config, episodes, feeds, jingle_finder, public_feed, review
-from app.services import branding
+from app.services import branding, pipeline
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 
 
@@ -24,6 +25,13 @@ setup_logging()
 settings.ensure_dirs()
 init_db()
 branding.ensure_master_cover()
+
+with session_scope() as _startup_session:
+    _recovered = pipeline.recover_interrupted_episodes(_startup_session)
+    if _recovered:
+        logging.getLogger(__name__).warning(
+            "Requeued %d episode(s) left in an in-progress status by an interrupted previous run", _recovered
+        )
 
 app = FastAPI(title="PewPewAdPod")
 

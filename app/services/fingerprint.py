@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from pydub import AudioSegment
 
+from app.services.audio_io import load_mono_samples as _load_mono_samples
 from app.services.jingle_detector import normalized_cross_correlation
 
 log = logging.getLogger(__name__)
@@ -21,38 +21,44 @@ class MatchCandidate:
     correlation: float = 0.0  # waveform-verified similarity in [0, 1]; see _verify_candidate
 
 
-def _load_mono_samples(path: Path, target_sr: int) -> np.ndarray:
-    seg = AudioSegment.from_file(path).set_channels(1).set_frame_rate(target_sr)
-    samples = np.array(seg.get_array_of_samples()).astype(np.float32)
-    samples /= float(1 << (8 * seg.sample_width - 1))
-    return samples
+_SPECTROGRAM_CHUNK_FRAMES = 5000
 
 
 def _spectrogram_peaks(
     samples: np.ndarray, frame_size: int, hop_size: int, num_peaks: int, min_freq_bin: int = 2
 ) -> list[list[int]]:
+    """Processes windowed STFT frames in bounded-size chunks rather than all at once:
+    "as_strided(...) * window" over the whole signal allocates frame_count * frame_size
+    * 4 bytes in one go - for a several-hours-long episode that's close to a gigabyte,
+    per file compared. Chunking bounds peak memory regardless of episode length, with
+    identical output (each frame's peaks only depend on that frame)."""
     n_frames = 1 + (len(samples) - frame_size) // hop_size
     if n_frames <= 0:
         return []
 
     window = np.hanning(frame_size).astype(np.float32)
-    shape = (n_frames, frame_size)
-    strides = (samples.strides[0] * hop_size, samples.strides[0])
-    frames = np.lib.stride_tricks.as_strided(samples, shape=shape, strides=strides) * window
-
-    magnitude = np.abs(np.fft.rfft(frames, axis=1))
-    magnitude[:, :min_freq_bin] = 0.0
 
     peaks_per_frame: list[list[int]] = []
-    for i in range(n_frames):
-        mag = magnitude[i]
-        peak_mag = mag.max()
-        if peak_mag < 1e-6:
-            peaks_per_frame.append([])
-            continue
-        top_idx = np.argpartition(mag, -num_peaks)[-num_peaks:]
-        threshold = mag.mean() * 3
-        peaks_per_frame.append(sorted(int(idx) for idx in top_idx if mag[idx] > threshold))
+    for chunk_start in range(0, n_frames, _SPECTROGRAM_CHUNK_FRAMES):
+        chunk_end = min(n_frames, chunk_start + _SPECTROGRAM_CHUNK_FRAMES)
+        count = chunk_end - chunk_start
+        chunk_samples = samples[chunk_start * hop_size :]
+        shape = (count, frame_size)
+        strides = (chunk_samples.strides[0] * hop_size, chunk_samples.strides[0])
+        frames = np.lib.stride_tricks.as_strided(chunk_samples, shape=shape, strides=strides) * window
+
+        magnitude = np.abs(np.fft.rfft(frames, axis=1))
+        magnitude[:, :min_freq_bin] = 0.0
+
+        for i in range(count):
+            mag = magnitude[i]
+            peak_mag = mag.max()
+            if peak_mag < 1e-6:
+                peaks_per_frame.append([])
+                continue
+            top_idx = np.argpartition(mag, -num_peaks)[-num_peaks:]
+            threshold = mag.mean() * 3
+            peaks_per_frame.append(sorted(int(idx) for idx in top_idx if mag[idx] > threshold))
     return peaks_per_frame
 
 

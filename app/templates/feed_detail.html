@@ -66,8 +66,18 @@
           </div>
         {% elif ep.status.startswith("failed_") or ep.status == "error_permanent" %}
           <form method="post" action="/episodes/{{ ep.id }}/retry"><button class="secondary">Retry</button></form>
+        {% elif ep.status == "new" %}
+          {% if ep.id in queue_positions %}
+            <span class="muted">Warteschlange: Position {{ queue_positions[ep.id] }} von {{ queue_total }}</span>
+          {% else %}
+            <span class="muted">wartet…</span>
+          {% endif %}
         {% elif ep.status == "reanalyze" %}
-          <span class="muted">wartet auf Neuanalyse…</span>
+          {% if ep.id in queue_positions %}
+            <span class="muted">Wartet auf Neuanalyse &middot; Position {{ queue_positions[ep.id] }} von {{ queue_total }}</span>
+          {% else %}
+            <span class="muted">wartet auf Neuanalyse…</span>
+          {% endif %}
         {% else %}
           <span class="muted">wird verarbeitet…</span>
         {% endif %}

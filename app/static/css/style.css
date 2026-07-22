@@ -115,6 +115,7 @@ tr:last-child td { border-bottom: none; }
 .chip-jingle { background: #e0f2ea; color: #157347; }
 .chip-duplicate { background: var(--high-soft); color: #a11313; }
 .chip-beat { background: #ede4fb; color: #6b21a8; }
+.chip-llm { background: #e0edff; color: #1d4ed8; }
 
 input[type=text], input[type=number], input[type=url] {
   background: var(--surface);

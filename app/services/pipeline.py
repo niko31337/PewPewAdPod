@@ -91,6 +91,7 @@ def persist_ad_segments(
             is_correction=is_correction,
             is_duplicate_match=c.duplicate_confidence > 0,
             is_beat_match=c.beat_score > 0,
+            is_llm_match=c.llm_score > 0,
         )
         session.add(row)
         rows.append(row)
@@ -253,6 +254,71 @@ def reprocess_episode(episode_id: int) -> None:
 
     if run_full_pipeline:
         process_episode(episode_id)
+
+
+_STUCK_STATUSES = [
+    EpisodeStatus.DOWNLOADING,
+    EpisodeStatus.TRANSCRIBING,
+    EpisodeStatus.ANALYZING,
+    EpisodeStatus.CUTTING,
+]
+
+
+def recover_interrupted_episodes(session: Session) -> int:
+    """Run once at startup. Nothing can still be "in progress" on an episode left in a
+    transient status (downloading/transcribing/analyzing/cutting) from before this
+    process started - the previous run that set it was killed mid-step (container
+    restart, crash, host reboot) without a chance to mark it failed. Left alone, such an
+    episode is stuck forever: only NEW/REANALYZE are polled by the queue, and only
+    FAILED_* is retried. Requeue via NEW (a full pipeline run), not REANALYZE: an
+    interrupted download/transcribe never leaves reliably-cached audio or a complete
+    transcript behind, so reprocess_episode() would just take its "nothing cached"
+    fallback path anyway - and that path unconditionally resets retry_count to 0
+    (by design, for a deliberate user-triggered "Neu analysieren" click). Routing
+    through it here would silently erase the count this function just incremented on
+    every single cycle, so an episode that reliably kills the process would requeue
+    and crash forever at "attempt 1" without ever actually reaching max_retries.
+
+    Counts against retry_count like any other failure. Without this, an episode that
+    reliably kills the process (e.g. one so long it exhausts memory) would requeue and
+    crash again forever - never reaching _mark_failed(), which is the only other place
+    retry_count normally advances - silently wedging the whole queue behind it since
+    the single-worker scheduler always processes the oldest queued episode first."""
+    stuck = session.exec(select(Episode).where(Episode.status.in_(_STUCK_STATUSES))).all()
+    for episode in stuck:
+        interrupted_status = episode.status
+        episode.retry_count += 1
+        if episode.retry_count >= settings.max_retries:
+            log.warning(
+                "Episode %s (%s) was interrupted from status=%s %d time(s) - giving up, "
+                "marking error_permanent instead of requeuing again",
+                episode.id,
+                episode.title,
+                interrupted_status,
+                episode.retry_count,
+            )
+            episode.status = EpisodeStatus.ERROR_PERMANENT
+            episode.error_message = (
+                f"Verarbeitung wurde {episode.retry_count}x unterbrochen (zuletzt bei "
+                f"Status '{interrupted_status}'), vermutlich weil der Prozess dabei abgestürzt ist "
+                "(z.B. Speicherverbrauch bei einer sehr langen Episode). Manueller Retry möglich."
+            )
+        else:
+            log.warning(
+                "Episode %s (%s) was left in status=%s by an interrupted run - requeuing (attempt %d/%d)",
+                episode.id,
+                episode.title,
+                interrupted_status,
+                episode.retry_count,
+                settings.max_retries,
+            )
+            episode.status = EpisodeStatus.NEW
+            episode.error_message = None
+        episode.updated_at = _now()
+        session.add(episode)
+    if stuck:
+        session.commit()
+    return len(stuck)
 
 
 def _mark_correction_failed(session: Session, episode: Episode, exc: Exception) -> None:

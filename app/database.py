@@ -1,4 +1,6 @@
 import logging
+import sqlite3
+import time
 from contextlib import contextmanager
 
 from sqlalchemy import event, inspect, text
@@ -11,10 +13,43 @@ from app.config import settings
 
 settings.ensure_dirs()
 
-engine = create_engine(
-    f"sqlite:///{settings.db_path}",
-    connect_args={"check_same_thread": False},
-)
+
+def _connect_with_retry(attempts: int = 8, delay_s: float = 0.25) -> sqlite3.Connection:
+    """Docker Desktop's Windows bind-mount occasionally makes sqlite fail with "unable
+    to open database file" for no real reason - a transient file-access race, not a
+    genuine problem with the DB file itself (the very next attempt, moments later,
+    succeeds). Seen in practice specifically when several scheduler jobs fire on the
+    same tick and each opens its own connection at once.
+
+    sqlite3.connect() itself does NOT touch the file - sqlite opens it lazily on the
+    first real statement. So retrying only around connect() (the original version of
+    this function) never actually caught the race: connect() always "succeeded", and
+    the OperationalError instead surfaced later and uncaught, from inside SQLAlchemy's
+    "connect" event listener (_set_sqlite_pragma's `PRAGMA journal_mode=WAL`), by which
+    point it was no longer inside this retry loop. Executing a real statement here -
+    the same PRAGMA _set_sqlite_pragma will otherwise be the first to run - forces the
+    lazy open (and the race) to happen inside the loop, where a failure discards the
+    connection and retries with a fresh one, matching the retry/backoff pattern already
+    used for the analogous Windows file-lock race in downloader.py's
+    _replace_with_retry()."""
+    last_exc: sqlite3.OperationalError | None = None
+    for attempt in range(attempts):
+        conn = None
+        try:
+            conn = sqlite3.connect(str(settings.db_path), check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError as exc:
+            if conn is not None:
+                conn.close()
+            last_exc = exc
+            if attempt < attempts - 1:
+                time.sleep(delay_s)
+            continue
+        return conn
+    raise last_exc
+
+
+engine = create_engine("sqlite://", creator=_connect_with_retry)
 
 
 @event.listens_for(Engine, "connect")

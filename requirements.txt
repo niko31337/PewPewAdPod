@@ -15,3 +15,10 @@ pyyaml
 mutagen
 numpy
 Pillow
+
+# Local LLM ad-classification (opt-in, see AppConfig.llm_ad_detection_enabled). No
+# prebuilt CPU wheel on PyPI itself - the maintainer publishes one on this extra index,
+# which avoids needing a C++ toolchain (cmake/build-essential) in the Docker image.
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+llama-cpp-python
+huggingface_hub

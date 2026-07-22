@@ -8,9 +8,10 @@ from pydub import AudioSegment
 from pydub.silence import detect_silence
 from sqlmodel import Session
 
-from app.services import beat_detector, cache_manager, fingerprint, jingle_detector
+from app.services import audio_io, beat_detector, cache_manager, fingerprint, jingle_detector, llm_detector
 from app.services.beat_detector import BeatWindow
 from app.services.jingle_detector import JingleHit
+from app.services.llm_detector import LlmHit
 from app.services.transcriber import TranscriptSegment
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class Candidate:
     duplicate_confidence: float = 0.0
     duplicate_support: int = 0
     beat_score: float = 0.0
+    llm_score: float = 0.0
     confidence: float = 0.0
     silence_snapped: bool = False
     rms_jump_db: float = 0.0
@@ -67,6 +69,7 @@ class ScoringConfig:
     keyword_normalization: float
     auto_cut_default_threshold: float
     beat_weight: float = 0.3
+    llm_weight: float = 0.35
 
 
 @dataclass
@@ -123,6 +126,12 @@ class BeatConfig:
 
 
 @dataclass
+class LlmDetectionConfig:
+    window_seconds: float = 30.0
+    min_confidence: float = 0.6
+
+
+@dataclass
 class DetectorConfig:
     keywords: list[KeywordConfig]
     window: WindowConfig
@@ -132,6 +141,7 @@ class DetectorConfig:
     jingles: JingleConfig
     duplicates: DuplicateConfig
     beat: BeatConfig = field(default_factory=BeatConfig)
+    llm: LlmDetectionConfig = field(default_factory=LlmDetectionConfig)
 
 
 def load_keyword_config(path: Path) -> DetectorConfig:
@@ -145,6 +155,7 @@ def load_keyword_config(path: Path) -> DetectorConfig:
         jingles=JingleConfig(**raw["jingles"]),
         duplicates=DuplicateConfig(**raw["duplicates"]),
         beat=BeatConfig(**raw["beat"]) if "beat" in raw else BeatConfig(),
+        llm=LlmDetectionConfig(**raw["llm"]) if "llm" in raw else LlmDetectionConfig(),
     )
 
 
@@ -214,6 +225,7 @@ def merge_candidates(candidates: list[Candidate], merge_gap_ms: int) -> list[Can
                 last.duplicate_confidence = cur.duplicate_confidence
                 last.duplicate_support = cur.duplicate_support
             last.beat_score = max(last.beat_score, cur.beat_score)
+            last.llm_score = max(last.llm_score, cur.llm_score)
             last.source = "merged"
         else:
             merged.append(cur)
@@ -295,7 +307,8 @@ def score_candidate(
         keyword_score * scoring.keyword_weight
         + jingle_score * scoring.jingle_weight
         + acoustic_score * scoring.acoustic_weight
-        + candidate.beat_score * scoring.beat_weight,
+        + candidate.beat_score * scoring.beat_weight
+        + candidate.llm_score * scoring.llm_weight,
     )
 
     # A *paired* jingle match (the same or a start/end jingle bracketing the block from
@@ -453,6 +466,41 @@ def build_candidates_from_beat_windows(
     return candidates
 
 
+def build_candidates_from_llm_hits(
+    hits: list[LlmHit], llm_cfg: LlmDetectionConfig, audio_duration_s: float
+) -> list[Candidate]:
+    """Merges consecutive transcript windows the local LLM classified as ad-like into
+    candidate blocks - independent of the fixed keyword list, so it also catches
+    paraphrased sponsor reads a hardcoded phrase never matches."""
+    hits_over_threshold = [h for h in hits if h.confidence >= llm_cfg.min_confidence]
+    if not hits_over_threshold:
+        return []
+    hits_sorted = sorted(hits_over_threshold, key=lambda h: h.start_s)
+
+    spans: list[list[LlmHit]] = [[hits_sorted[0]]]
+    for h in hits_sorted[1:]:
+        if h.start_s <= spans[-1][-1].end_s:
+            spans[-1].append(h)
+        else:
+            spans.append([h])
+
+    candidates: list[Candidate] = []
+    for span in spans:
+        start_s = max(0.0, span[0].start_s)
+        end_s = min(audio_duration_s, span[-1].end_s)
+        if end_s <= start_s:
+            continue
+        candidates.append(
+            Candidate(
+                start_ms=int(start_s * 1000),
+                end_ms=int(end_s * 1000),
+                llm_score=max(h.confidence for h in span),
+                source="llm",
+            )
+        )
+    return candidates
+
+
 def _build_transcript_snippet(segments: list[TranscriptSegment], start_s: float, end_s: float) -> str:
     parts = [s.text.strip() for s in segments if s.end >= start_s and s.start <= end_s]
     snippet = " ".join(parts).strip()
@@ -469,9 +517,10 @@ def detect_ad_segments(
     previous_episode_audio_path: Path | None = None,
 ) -> list[Candidate]:
     config = load_keyword_config(config_path)
-    audio = AudioSegment.from_file(audio_path)
+    audio = audio_io.load_audio_segment(audio_path)
     audio_duration_s = len(audio) / 1000.0
 
+    app_config = None
     if session is not None:
         app_config = cache_manager.get_or_create_config(session)
         if app_config.min_duplicate_seconds is not None:
@@ -534,8 +583,16 @@ def detect_ad_segments(
     except Exception:
         log.warning("Could not run background-beat detection for %s", audio_path, exc_info=True)
 
+    llm_candidates: list[Candidate] = []
+    if app_config is not None and app_config.llm_ad_detection_enabled:
+        try:
+            llm_hits = llm_detector.classify_transcript_windows(transcript, config.llm.window_seconds, audio_duration_s)
+            llm_candidates = build_candidates_from_llm_hits(llm_hits, config.llm, audio_duration_s)
+        except Exception:
+            log.warning("Local LLM ad classification failed for %s - skipping this signal", audio_path, exc_info=True)
+
     candidates = merge_candidates(
-        jingle_candidates + keyword_candidates + duplicate_candidates + beat_candidates,
+        jingle_candidates + keyword_candidates + duplicate_candidates + beat_candidates + llm_candidates,
         int(config.window.merge_gap_seconds * 1000),
     )
     if not candidates:
@@ -554,6 +611,7 @@ def detect_ad_segments(
                 bool(candidate.keyword_hits),
                 candidate.duplicate_confidence > 0,
                 candidate.beat_score > 0,
+                candidate.llm_score > 0,
             ]
         )
         if signal_count > 1:
@@ -564,6 +622,8 @@ def detect_ad_segments(
             candidate.source = "jingle"
         elif candidate.beat_score > 0:
             candidate.source = "beat"
+        elif candidate.llm_score > 0:
+            candidate.source = "llm"
         else:
             candidate.source = "merged" if len(candidate.keyword_hits) > 1 else "keyword"
 

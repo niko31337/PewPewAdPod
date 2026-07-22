@@ -51,12 +51,14 @@ def update_config(
     max_episodes_per_feed: str = Form(""),
     max_cache_size_mb: str = Form(""),
     min_duplicate_seconds: str = Form(""),
+    llm_ad_detection_enabled: bool = Form(False),
     session: Session = Depends(get_session),
 ):
     config = cache_manager.get_or_create_config(session)
     config.max_episodes_per_feed = _parse_optional_int(max_episodes_per_feed)
     config.max_cache_size_mb = _parse_optional_float(max_cache_size_mb)
     config.min_duplicate_seconds = _parse_optional_float(min_duplicate_seconds)
+    config.llm_ad_detection_enabled = llm_ad_detection_enabled
     config.updated_at = datetime.now(timezone.utc)
     session.add(config)
     session.commit()

@@ -39,6 +39,7 @@ class SegmentSource(str, Enum):
     JINGLE = "jingle"
     DUPLICATE = "duplicate"
     BEAT = "beat"
+    LLM = "llm"
 
 
 class CorrectionStatus(str, Enum):
@@ -127,6 +128,7 @@ class AdSegment(SQLModel, table=True):
     is_correction: bool = False
     is_duplicate_match: bool = False  # found identical in the previous episode's audio too
     is_beat_match: bool = False  # steady background beat detected under this segment
+    is_llm_match: bool = False  # local LLM classified this transcript window as an ad
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -148,4 +150,5 @@ class AppConfig(SQLModel, table=True):
     max_episodes_per_feed: Optional[int] = None  # None = unbegrenzt
     max_cache_size_mb: Optional[float] = None  # None = unbegrenzt
     min_duplicate_seconds: Optional[float] = None  # None = ad_keywords.yaml-Default verwenden
+    llm_ad_detection_enabled: bool = False  # ressourcenintensiv - Opt-in
     updated_at: datetime = Field(default_factory=utcnow)

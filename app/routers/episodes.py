@@ -12,6 +12,17 @@ router = APIRouter()
 
 RECENT_EPISODES_SHOWN = 5
 
+_QUEUED_STATUSES = [EpisodeStatus.NEW, EpisodeStatus.REANALYZE]
+
+
+def _queue_positions(session: Session) -> dict[int, int]:
+    """1-based position of every queued episode, in the exact order process_queue_job
+    (scheduler.py) will claim them - same status filter, same order_by(created_at)."""
+    queued = session.exec(
+        select(Episode.id).where(Episode.status.in_(_QUEUED_STATUSES)).order_by(Episode.created_at)
+    ).all()
+    return {episode_id: position for position, episode_id in enumerate(queued, start=1)}
+
 
 @router.get("/feeds/{feed_id}")
 def feed_detail(feed_id: int, request: Request, session: Session = Depends(get_session)):
@@ -24,10 +35,17 @@ def feed_detail(feed_id: int, request: Request, session: Session = Depends(get_s
         .order_by(Episode.created_at.desc())
         .limit(RECENT_EPISODES_SHOWN)
     ).all()
+    positions = _queue_positions(session)
     return templates.TemplateResponse(
         request,
         "feed_detail.html",
-        {"feed": feed, "episodes": episodes, "default_threshold": settings.default_auto_cut_threshold},
+        {
+            "feed": feed,
+            "episodes": episodes,
+            "default_threshold": settings.default_auto_cut_threshold,
+            "queue_positions": positions,
+            "queue_total": len(positions),
+        },
     )
 
 

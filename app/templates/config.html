@@ -38,6 +38,22 @@
       als Duplikat (kurze Treffer sind meist Zufall, keine echten Wiederholungen wie Intro/Outro
       oder unveränderte Werbeblöcke). Leer lassen = Standard ({{ default_min_duplicate_seconds }}s).
     </p>
+
+    <div class="flex" style="margin-bottom:0.25rem;">
+      <label class="flex">
+        <input type="checkbox" name="llm_ad_detection_enabled" value="true"
+               {% if config.llm_ad_detection_enabled %}checked{% endif %}>
+        Werbeerkennung per lokalem KI-Modell
+      </label>
+    </div>
+    <p class="muted small">
+      Lässt zusätzlich ein kleines lokales Sprachmodell (Qwen2.5-1.5B) jeden Transkript-Abschnitt
+      bewerten, ob er wie eine Werbe-/Sponsoreneinsprechung klingt — erkennt auch umformulierte
+      Werbung ohne exakten Keyword-Treffer. <strong>Ressourcenintensiv:</strong> beim ersten Einsatz
+      wird das Modell (~1&nbsp;GB) heruntergeladen und dauerhaft im Arbeitsspeicher gehalten, und
+      jede Analyse dauert dadurch spürbar länger. Standardmäßig aus — bei Bedarf hier abschaltbar,
+      falls es dem Server zu viel wird.
+    </p>
     <button type="submit">Speichern</button>
   </form>
 </div>

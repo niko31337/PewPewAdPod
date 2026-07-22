@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     whisper_model_size: str = "small"
     whisper_compute_type: str = "int8"
 
+    # Local LLM ad classification (opt-in per AppConfig.llm_ad_detection_enabled - only
+    # downloaded/loaded into memory the first time an episode is analyzed with it on)
+    llm_model_repo: str = "Qwen/Qwen2.5-1.5B-Instruct-GGUF"
+    llm_model_filename: str = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+    llm_context_tokens: int = 2048
+    llm_threads: int = 4
+
     # Cutting
     crossfade_ms: int = 50
     default_auto_cut_threshold: float = 0.75
