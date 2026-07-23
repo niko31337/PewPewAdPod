@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.database import get_session
 from app.models import Episode, EpisodeStatus, Feed
+from app.paths import resolve_cover_path
 from app.services import branding
 from app.services.feed_generator import build_feed_xml, build_master_feed_xml
 
@@ -30,8 +31,16 @@ def master_feed(request: Request, session: Session = Depends(get_session)):
         if episode is None or not episode.processed_audio_path:
             continue
 
-        source_image = episode.local_image_path or feed.cover_image_local_path
-        watermarked = branding.ensure_watermarked_episode_image(source_image, feed.id, episode.id)
+        episode_cover = resolve_cover_path(
+            episode.local_image_path, settings.covers_dir / str(feed.id) / "episodes" / f"{episode.id}.jpg"
+        )
+        feed_cover = resolve_cover_path(
+            feed.cover_image_local_path, settings.covers_dir / str(feed.id) / "cover.jpg"
+        )
+        source_image = episode_cover or feed_cover
+        watermarked = branding.ensure_watermarked_episode_image(
+            str(source_image) if source_image else None, feed.id, episode.id
+        )
         image_url = (
             f"{base_url}media/covers/master/episodes/{episode.id}.jpg" if watermarked else master_cover_url
         )

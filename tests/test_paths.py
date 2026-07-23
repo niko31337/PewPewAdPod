@@ -1,5 +1,5 @@
 from app import paths
-from app.paths import cross_platform_basename, resolve_stored_path
+from app.paths import cross_platform_basename, resolve_cover_path, resolve_stored_path
 
 
 def test_windows_style_path():
@@ -56,3 +56,32 @@ def test_resolve_stored_path_returns_none_when_file_truly_missing(tmp_path, monk
     monkeypatch.setattr(paths.settings, "processed_dir", tmp_path / "processed")
 
     assert resolve_stored_path(r"C:\some\stale\path\99.mp3") is None
+
+
+def test_resolve_cover_path_uses_the_stored_path_as_is_when_it_exists(tmp_path):
+    cover = tmp_path / "cover.jpg"
+    cover.write_bytes(b"data")
+    canonical = tmp_path / "elsewhere" / "cover.jpg"  # deliberately not where the file is
+
+    assert resolve_cover_path(str(cover), canonical) == cover
+
+
+def test_resolve_cover_path_falls_back_to_canonical_location_for_a_foreign_os_path(tmp_path):
+    # Reproduces the real bug: a Feed/Episode row whose cover path was written by a
+    # process on a different OS (e.g. a Linux Docker container's "/app/data/..." path,
+    # now read by this Windows test run - or, in production, the reverse: a
+    # Windows-authored path read inside the container). Path(...).exists() on a
+    # foreign-OS string is always False, so watermarking silently fell back to the
+    # fully-replaced master cover instead of actually watermarking this feed's real
+    # cover art - even though the real file is sitting right where convention says.
+    canonical = tmp_path / "covers" / "2" / "cover.jpg"
+    canonical.parent.mkdir(parents=True)
+    canonical.write_bytes(b"data")
+    stale_foreign_path = "/app/data/covers/2/cover.jpg"
+
+    assert resolve_cover_path(stale_foreign_path, canonical) == canonical
+
+
+def test_resolve_cover_path_returns_none_when_nothing_exists(tmp_path):
+    assert resolve_cover_path(None, tmp_path / "covers" / "9" / "cover.jpg") is None
+    assert resolve_cover_path("/app/data/covers/9/cover.jpg", tmp_path / "covers" / "9" / "cover.jpg") is None
