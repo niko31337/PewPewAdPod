@@ -3,6 +3,22 @@
 <h1>Einstellungen</h1>
 
 <div class="card">
+  <h3>Podcasts importieren (OPML)</h3>
+  <p class="muted">
+    OPML-Datei aus einem anderen Podcast-Player (z. B. Apple Podcasts, Overcast, Pocket Casts)
+    hochladen, um mehrere Abonnements auf einmal zu übernehmen. Im nächsten Schritt kannst du
+    auswählen, welche davon tatsächlich importiert werden sollen — bereits abonnierte Podcasts
+    sind dort vorab abgewählt.
+  </p>
+  <form method="post" action="/opml/import" enctype="multipart/form-data">
+    <div class="flex">
+      <input type="file" name="file" accept=".opml,.xml" required>
+      <button type="submit">Datei hochladen</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
   <h3>Episoden-Cache</h3>
   <p class="muted">
     Steuert, wie viele heruntergeladene/veröffentlichte Episoden lokal vorgehalten werden.

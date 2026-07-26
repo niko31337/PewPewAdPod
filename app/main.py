@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import BASE_DIR, settings
 from app.database import init_db, session_scope
 from app.logging_conf import setup_logging
-from app.routers import config, episodes, feeds, jingle_finder, public_feed, review
+from app.routers import config, episodes, feeds, jingle_finder, opml, public_feed, review
 from app.services import branding, pipeline
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 
@@ -45,6 +45,7 @@ app.include_router(episodes.router)
 app.include_router(review.router)
 app.include_router(config.router)
 app.include_router(jingle_finder.router)
+app.include_router(opml.router)
 app.include_router(public_feed.router)
 
 

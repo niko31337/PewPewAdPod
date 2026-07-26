@@ -2,6 +2,16 @@
 {% block content %}
 <h1>Feeds</h1>
 
+{% if opml_imported is not none %}
+<div class="card">
+  {% if opml_imported > 0 %}
+    <p>{{ opml_imported }} Podcast(s) aus der OPML-Datei importiert.</p>
+  {% else %}
+    <p class="muted">Keine Podcasts importiert (nichts ausgewählt oder alle bereits abonniert).</p>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
   <div class="flex" style="justify-content:space-between;">
     <div>

@@ -16,10 +16,16 @@ router = APIRouter()
 
 
 @router.get("/")
-def index(request: Request, session: Session = Depends(get_session)):
+def index(request: Request, opml_imported: int | None = None, session: Session = Depends(get_session)):
     feeds = session.exec(select(Feed).order_by(Feed.created_at)).all()
     return templates.TemplateResponse(
-        request, "index.html", {"feeds": feeds, "default_threshold": settings.default_auto_cut_threshold}
+        request,
+        "index.html",
+        {
+            "feeds": feeds,
+            "default_threshold": settings.default_auto_cut_threshold,
+            "opml_imported": opml_imported,
+        },
     )
 
 
