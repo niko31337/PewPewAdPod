@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>OPML-Import</h1>
+
+{% if parse_error %}
+<div class="card">
+  <p class="muted">{{ parse_error }}</p>
+  <a href="/config"><button class="secondary">Zurück zu den Einstellungen</button></a>
+</div>
+{% else %}
+<p class="muted">
+  {{ rows|length }} Podcast(s) in der Datei gefunden. Bereits abonnierte Podcasts sind standardmäßig
+  abgewählt, lassen sich bei Bedarf aber trotzdem erneut auswählen.
+</p>
+<form method="post" action="/opml/import/confirm">
+  <table>
+    <thead><tr><th>Importieren</th><th>Titel</th><th>Feed-URL</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>
+          <input type="checkbox" name="import_{{ loop.index0 }}" value="1" {% if not row.already_subscribed %}checked{% endif %}>
+          <input type="hidden" name="url_{{ loop.index0 }}" value="{{ row.xml_url }}">
+          <input type="hidden" name="title_{{ loop.index0 }}" value="{{ row.title }}">
+        </td>
+        <td>
+          {{ row.title }}
+          {% if row.already_subscribed %}<span class="badge pending_review">bereits abonniert</span>{% endif %}
+        </td>
+        <td class="muted small">{{ row.xml_url }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="muted">Keine Podcasts mit Feed-URL in dieser Datei gefunden.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if rows %}
+  <div class="flex" style="margin-top:1rem;">
+    <button type="submit">Ausgewählte importieren</button>
+    <a href="/config"><button type="button" class="secondary">Abbrechen</button></a>
+  </div>
+  {% endif %}
+</form>
+{% endif %}
+{% endblock %}

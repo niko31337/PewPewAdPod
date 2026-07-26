@@ -16,3 +16,5 @@ data/app.db-wal
 /data/logs/*
 /data/transcripts/*
 /data/app.db*
+/Caddyfile
+/docker-compose.prod.yml
