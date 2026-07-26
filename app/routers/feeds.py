@@ -84,6 +84,19 @@ def toggle_auto_cut(feed_id: int, session: Session = Depends(get_session)):
     return RedirectResponse(url=f"/feeds/{feed_id}", status_code=303)
 
 
+@router.post("/feeds/{feed_id}/toggle-active")
+def toggle_active(feed_id: int, session: Session = Depends(get_session)):
+    """Inactive feeds are skipped by poll_all_feeds() (no new episodes discovered) and
+    excluded from the master feed - existing episodes/subscriptions are untouched, this
+    just pauses picking up anything new."""
+    feed = session.get(Feed, feed_id)
+    if feed:
+        feed.active = not feed.active
+        session.add(feed)
+        session.commit()
+    return RedirectResponse(url=f"/feeds/{feed_id}", status_code=303)
+
+
 @router.post("/feeds/{feed_id}/update-threshold")
 def update_threshold(feed_id: int, confidence_threshold: str = Form(""), session: Session = Depends(get_session)):
     feed = session.get(Feed, feed_id)

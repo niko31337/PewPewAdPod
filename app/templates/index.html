@@ -47,6 +47,9 @@
       <h3><a href="/feeds/{{ feed.id }}">{{ feed.title }}</a></h3>
       <div class="muted">{{ feed.original_rss_url }}</div>
       <div style="margin: 0.3rem 0;">
+        <span class="badge {{ 'published' if feed.active else '' }}">
+          {{ "Aktiv" if feed.active else "Inaktiv" }}
+        </span>
         <span class="badge {{ 'published' if feed.auto_cut else 'pending_review' }}">
           {{ "Auto-Cut" if feed.auto_cut else "Manuelle Review" }}
         </span>
@@ -62,6 +65,11 @@
   </div>
   <div class="flex" style="margin-top:0.5rem;">
     <form method="post" action="/feeds/{{ feed.id }}/refresh"><button class="secondary">Jetzt aktualisieren</button></form>
+    <form method="post" action="/feeds/{{ feed.id }}/toggle-active">
+      <button class="secondary" title="Pausiert das Abrufen neuer Episoden und nimmt den Feed aus dem Sammelfeed heraus, bestehende Episoden/Abo bleiben erhalten">
+        {{ "Deaktivieren" if feed.active else "Aktivieren" }}
+      </button>
+    </form>
     <form method="post" action="/feeds/{{ feed.id }}/toggle-auto-cut"><button class="secondary">Auto-Cut umschalten</button></form>
     <form method="post" action="/feeds/{{ feed.id }}/delete" onsubmit="return confirm('Feed wirklich löschen?');"><button class="danger">Löschen</button></form>
   </div>
