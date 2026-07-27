@@ -1,4 +1,14 @@
-from app.services.ad_detector import WindowConfig, build_candidate_windows, find_keyword_hits, merge_candidates
+import logging
+
+import pytest
+
+from app.services.ad_detector import (
+    WindowConfig,
+    _log_stage,
+    build_candidate_windows,
+    find_keyword_hits,
+    merge_candidates,
+)
 from app.services.transcriber import TranscriptSegment, Word
 
 
@@ -64,3 +74,30 @@ def test_merge_candidates_joins_overlapping_windows():
 
     assert len(merged) == 1
     assert len(merged[0].keyword_hits) == 2
+
+
+def test_log_stage_logs_start_and_finish_with_elapsed_time(caplog):
+    # detect_ad_segments() used to log nothing between "started" and "finished" for its
+    # whole multi-stage analysis - for a long episode that meant hours of silence with
+    # no way to tell which of its signals (jingle/keyword/duplicate/beat/LLM detection)
+    # was actually slow. _log_stage() brackets each stage instead; this locks in that a
+    # stage always logs both ends, identified by episode and stage name.
+    with caplog.at_level(logging.INFO, logger="app.services.ad_detector"):
+        with _log_stage("42", "jingle detection"):
+            pass
+
+    messages = [r.message for r in caplog.records]
+    assert any("42" in m and "jingle detection" in m and "starting" in m for m in messages)
+    assert any("42" in m and "jingle detection" in m and "finished" in m for m in messages)
+
+
+def test_log_stage_still_logs_finish_when_the_stage_raises(caplog):
+    # A stage that crashes must still report how long it ran before failing - that's
+    # exactly the moment this diagnostic logging matters most.
+    with caplog.at_level(logging.INFO, logger="app.services.ad_detector"):
+        with pytest.raises(ValueError):
+            with _log_stage("42", "beat detection"):
+                raise ValueError("boom")
+
+    messages = [r.message for r in caplog.records]
+    assert any("finished" in m and "beat detection" in m for m in messages)

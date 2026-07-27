@@ -1,5 +1,7 @@
 import logging
 import math
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,6 +17,21 @@ from app.services.llm_detector import LlmHit
 from app.services.transcriber import TranscriptSegment
 
 log = logging.getLogger(__name__)
+
+
+@contextmanager
+def _log_stage(episode_label: str, stage: str):
+    """detect_ad_segments() previously logged nothing between "started" and "finished"
+    for the whole analysis - for a very long episode that can mean hours of silence in
+    the logs with no way to tell which of its five signals (jingle/keyword/duplicate/
+    beat/LLM detection) is actually the slow one. Brackets each stage with a start/end
+    log line instead."""
+    start = time.monotonic()
+    log.info("Episode %s: starting %s", episode_label, stage)
+    try:
+        yield
+    finally:
+        log.info("Episode %s: finished %s (%.1fs)", episode_label, stage, time.monotonic() - start)
 
 
 @dataclass
@@ -516,9 +533,11 @@ def detect_ad_segments(
     jingles_dir: Path | None = None,
     previous_episode_audio_path: Path | None = None,
 ) -> list[Candidate]:
+    episode_label = audio_path.stem
     config = load_keyword_config(config_path)
-    audio = audio_io.load_audio_segment(audio_path)
-    audio_duration_s = len(audio) / 1000.0
+    with _log_stage(episode_label, "audio load"):
+        audio = audio_io.load_audio_segment(audio_path)
+        audio_duration_s = len(audio) / 1000.0
 
     app_config = None
     if session is not None:
@@ -528,104 +547,114 @@ def detect_ad_segments(
 
     jingle_candidates: list[Candidate] = []
     if session is not None and feed_id is not None and jingles_dir is not None:
-        jingle_hits = jingle_detector.find_jingle_hits(
-            session,
-            feed_id,
-            audio,
-            jingles_dir,
-            config.jingles.target_sample_rate,
-            config.jingles.match_threshold,
-            config.jingles.confident_threshold,
-        )
-        jingle_candidates = build_candidates_from_jingle_hits(
-            jingle_hits, config.window, config.jingles, audio_duration_s
-        )
+        with _log_stage(episode_label, "jingle detection"):
+            jingle_hits = jingle_detector.find_jingle_hits(
+                session,
+                feed_id,
+                audio,
+                jingles_dir,
+                config.jingles.target_sample_rate,
+                config.jingles.match_threshold,
+                config.jingles.confident_threshold,
+            )
+            jingle_candidates = build_candidates_from_jingle_hits(
+                jingle_hits, config.window, config.jingles, audio_duration_s
+            )
 
-    keyword_hits = find_keyword_hits(transcript, config)
-    keyword_candidates = (
-        build_candidate_windows(keyword_hits, config.window, audio_duration_s) if keyword_hits else []
-    )
+    with _log_stage(episode_label, "keyword matching"):
+        keyword_hits = find_keyword_hits(transcript, config)
+        keyword_candidates = (
+            build_candidate_windows(keyword_hits, config.window, audio_duration_s) if keyword_hits else []
+        )
 
     duplicate_candidates: list[Candidate] = []
     if previous_episode_audio_path is not None:
-        try:
-            matches = fingerprint.find_repeated_segments(
-                audio_path,
-                previous_episode_audio_path,
-                min_verify_correlation=config.duplicates.verify_correlation_threshold,
-            )
-            duplicate_candidates = build_candidates_from_duplicate_matches(
-                matches, config.duplicates, audio_duration_s
-            )
-        except Exception:
-            log.warning(
-                "Could not compare against previous episode's audio (%s) - skipping duplicate-segment "
-                "detection for this episode",
-                previous_episode_audio_path,
-                exc_info=True,
-            )
+        with _log_stage(episode_label, f"duplicate detection (vs. {previous_episode_audio_path.stem})"):
+            try:
+                matches = fingerprint.find_repeated_segments(
+                    audio_path,
+                    previous_episode_audio_path,
+                    min_verify_correlation=config.duplicates.verify_correlation_threshold,
+                )
+                duplicate_candidates = build_candidates_from_duplicate_matches(
+                    matches, config.duplicates, audio_duration_s
+                )
+            except Exception:
+                log.warning(
+                    "Could not compare against previous episode's audio (%s) - skipping duplicate-segment "
+                    "detection for this episode",
+                    previous_episode_audio_path,
+                    exc_info=True,
+                )
 
     beat_candidates: list[Candidate] = []
-    try:
-        beat_windows = beat_detector.find_beat_windows(
-            audio_path,
-            target_sample_rate=config.beat.target_sample_rate,
-            frame_size=config.beat.frame_size,
-            hop_size=config.beat.hop_size,
-            low_hz=config.beat.low_hz,
-            high_hz=config.beat.high_hz,
-            window_seconds=config.beat.window_seconds,
-            step_seconds=config.beat.step_seconds,
-            bpm_min=config.beat.bpm_min,
-            bpm_max=config.beat.bpm_max,
-        )
-        beat_candidates = build_candidates_from_beat_windows(beat_windows, config.beat, audio_duration_s)
-    except Exception:
-        log.warning("Could not run background-beat detection for %s", audio_path, exc_info=True)
+    with _log_stage(episode_label, "beat detection"):
+        try:
+            beat_windows = beat_detector.find_beat_windows(
+                audio_path,
+                target_sample_rate=config.beat.target_sample_rate,
+                frame_size=config.beat.frame_size,
+                hop_size=config.beat.hop_size,
+                low_hz=config.beat.low_hz,
+                high_hz=config.beat.high_hz,
+                window_seconds=config.beat.window_seconds,
+                step_seconds=config.beat.step_seconds,
+                bpm_min=config.beat.bpm_min,
+                bpm_max=config.beat.bpm_max,
+            )
+            beat_candidates = build_candidates_from_beat_windows(beat_windows, config.beat, audio_duration_s)
+        except Exception:
+            log.warning("Could not run background-beat detection for %s", audio_path, exc_info=True)
 
     llm_candidates: list[Candidate] = []
     if app_config is not None and app_config.llm_ad_detection_enabled:
-        try:
-            llm_hits = llm_detector.classify_transcript_windows(transcript, config.llm.window_seconds, audio_duration_s)
-            llm_candidates = build_candidates_from_llm_hits(llm_hits, config.llm, audio_duration_s)
-        except Exception:
-            log.warning("Local LLM ad classification failed for %s - skipping this signal", audio_path, exc_info=True)
+        with _log_stage(episode_label, "LLM classification"):
+            try:
+                llm_hits = llm_detector.classify_transcript_windows(
+                    transcript, config.llm.window_seconds, audio_duration_s
+                )
+                llm_candidates = build_candidates_from_llm_hits(llm_hits, config.llm, audio_duration_s)
+            except Exception:
+                log.warning(
+                    "Local LLM ad classification failed for %s - skipping this signal", audio_path, exc_info=True
+                )
 
-    candidates = merge_candidates(
-        jingle_candidates + keyword_candidates + duplicate_candidates + beat_candidates + llm_candidates,
-        int(config.window.merge_gap_seconds * 1000),
-    )
-    if not candidates:
-        return []
-
-    for candidate in candidates:
-        snap_to_silence(audio, candidate, config.silence)
-        rms_fraction = compute_rms_jump(audio, candidate, config.rms)
-        score_candidate(candidate, config.scoring, rms_fraction, config.jingles.confident_threshold)
-        candidate.transcript_snippet = _build_transcript_snippet(
-            transcript, candidate.start_ms / 1000.0, candidate.end_ms / 1000.0
+    with _log_stage(episode_label, "scoring candidates"):
+        candidates = merge_candidates(
+            jingle_candidates + keyword_candidates + duplicate_candidates + beat_candidates + llm_candidates,
+            int(config.window.merge_gap_seconds * 1000),
         )
-        signal_count = sum(
-            [
-                bool(candidate.jingle_hits),
-                bool(candidate.keyword_hits),
-                candidate.duplicate_confidence > 0,
-                candidate.beat_score > 0,
-                candidate.llm_score > 0,
-            ]
-        )
-        if signal_count > 1:
-            candidate.source = "merged"
-        elif candidate.duplicate_confidence > 0:
-            candidate.source = "duplicate"
-        elif candidate.jingle_hits:
-            candidate.source = "jingle"
-        elif candidate.beat_score > 0:
-            candidate.source = "beat"
-        elif candidate.llm_score > 0:
-            candidate.source = "llm"
-        else:
-            candidate.source = "merged" if len(candidate.keyword_hits) > 1 else "keyword"
+        if not candidates:
+            return []
 
-    candidates.sort(key=lambda c: c.start_ms)
-    return candidates
+        for candidate in candidates:
+            snap_to_silence(audio, candidate, config.silence)
+            rms_fraction = compute_rms_jump(audio, candidate, config.rms)
+            score_candidate(candidate, config.scoring, rms_fraction, config.jingles.confident_threshold)
+            candidate.transcript_snippet = _build_transcript_snippet(
+                transcript, candidate.start_ms / 1000.0, candidate.end_ms / 1000.0
+            )
+            signal_count = sum(
+                [
+                    bool(candidate.jingle_hits),
+                    bool(candidate.keyword_hits),
+                    candidate.duplicate_confidence > 0,
+                    candidate.beat_score > 0,
+                    candidate.llm_score > 0,
+                ]
+            )
+            if signal_count > 1:
+                candidate.source = "merged"
+            elif candidate.duplicate_confidence > 0:
+                candidate.source = "duplicate"
+            elif candidate.jingle_hits:
+                candidate.source = "jingle"
+            elif candidate.beat_score > 0:
+                candidate.source = "beat"
+            elif candidate.llm_score > 0:
+                candidate.source = "llm"
+            else:
+                candidate.source = "merged" if len(candidate.keyword_hits) > 1 else "keyword"
+
+        candidates.sort(key=lambda c: c.start_ms)
+        return candidates
