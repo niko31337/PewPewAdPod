@@ -18,3 +18,4 @@ data/app.db-wal
 /data/app.db*
 /Caddyfile
 /docker-compose.prod.yml
+/.env

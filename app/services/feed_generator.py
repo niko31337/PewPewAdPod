@@ -66,18 +66,26 @@ def build_feed_xml(feed: Feed, episodes: list[Episode], base_url: str) -> bytes:
 
 
 def build_master_feed_xml(
-    entries: list[tuple[Feed, Episode, str]], base_url: str, master_cover_url: str
+    entries: list[tuple[Feed, Episode, str]],
+    base_url: str,
+    master_cover_url: str,
+    feed_path: str = "feed/master.xml",
 ) -> bytes:
     """entries: (feed, episode, episode_image_url) tuples, one per source feed's latest
-    published episode - already resolved by the caller (incl. watermarking fallback)."""
+    published episode - already resolved by the caller (incl. watermarking fallback).
+    feed_path: the path this feed's own <id>/self-link should point at. Defaults to the
+    plain path, but callers hiding the feed behind a secret proxy path must pass that
+    path here instead - many aggregators re-fetch a feed using its own embedded
+    self-link rather than the URL it was originally subscribed with, so a self-link
+    pointing at a now-blocked plain path breaks those clients after the first fetch."""
     if not base_url.endswith("/"):
         base_url += "/"
 
     fg = FeedGenerator()
     fg.load_extension("podcast")
-    fg.id(f"{base_url}feed/master.xml")
+    fg.id(f"{base_url}{feed_path}")
     fg.title("Nikos pewpewadpod Feed")
-    fg.link(href=f"{base_url}feed/master.xml", rel="self")
+    fg.link(href=f"{base_url}{feed_path}", rel="self")
     fg.description(
         "Die jeweils neueste, werbefreie Episode aus allen bei PewPewAdPod hinterlegten Podcasts."
     )

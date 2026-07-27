@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     crossfade_ms: int = 50
     default_auto_cut_threshold: float = 0.75
 
+    # If set, the master feed's own self-referencing URLs (the <atom:link rel="self">
+    # and feed <id>) are built as "{token}/master.xml" instead of "feed/master.xml".
+    # For deployments that hide the master feed behind a secret path at the reverse
+    # proxy (see Caddyfile) - without this, aggregators that re-fetch a feed using its
+    # own embedded self-link (many do, per spec) would hit the now-blocked plain path
+    # and get stuck showing only whatever was cached from the first successful fetch.
+    # Must match the secret path segment configured in the proxy exactly.
+    master_feed_secret_token: str | None = None
+
     model_config = SettingsConfigDict(env_prefix="PODCAST_")
 
     def ensure_dirs(self) -> None:

@@ -46,7 +46,8 @@ def master_feed(request: Request, session: Session = Depends(get_session)):
         )
         entries.append((feed, episode, image_url))
 
-    xml_bytes = build_master_feed_xml(entries, base_url, master_cover_url)
+    feed_path = f"{settings.master_feed_secret_token}/master.xml" if settings.master_feed_secret_token else "feed/master.xml"
+    xml_bytes = build_master_feed_xml(entries, base_url, master_cover_url, feed_path)
     return Response(content=xml_bytes, media_type="application/rss+xml")
 
 
