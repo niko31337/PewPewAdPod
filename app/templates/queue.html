@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Queue</h1>
+<p class="muted">
+  Alle Episoden, die auf Verarbeitung warten ({{ rows|length }} insgesamt), in der Reihenfolge, in der sie
+  auch tatsächlich verarbeitet werden. Episoden, die ohnehin nie zur neuesten Episode ihres Podcasts werden
+  (weil bereits eine neuere veröffentlicht ist), lassen sich hier aus der Queue werfen, ohne die
+  Pipeline zu durchlaufen.
+</p>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Podcast</th><th>Episode</th><th>Veröffentlicht</th><th>Aktion</th></tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td class="muted">{{ loop.index }}</td>
+      <td>{{ row.feed_title }}</td>
+      <td>
+        {{ row.episode.title }}
+        {% if row.episode.status == "reanalyze" %}<span class="badge new">Neuanalyse</span>{% endif %}
+      </td>
+      <td class="muted">{{ row.episode.pubdate.strftime("%Y-%m-%d") if row.episode.pubdate else "" }}</td>
+      <td>
+        <form method="post" action="/episodes/{{ row.episode.id }}/skip"
+              onsubmit="return confirm('Diese Episode dauerhaft aus der Queue werfen? Sie wird nie verarbeitet und taucht bei zukünftigen Feed-Updates nicht erneut auf.');">
+          <button type="submit" class="danger">Verwerfen</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">Queue ist leer.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
