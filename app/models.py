@@ -23,6 +23,7 @@ class EpisodeStatus(str, Enum):
     FAILED_ANALYZE = "failed_analyze"
     FAILED_CUT = "failed_cut"
     ERROR_PERMANENT = "error_permanent"
+    SKIPPED = "skipped"
 
 
 class SegmentStatus(str, Enum):

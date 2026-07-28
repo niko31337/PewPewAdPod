@@ -74,6 +74,11 @@
           </div>
         {% elif ep.status.startswith("failed_") or ep.status == "error_permanent" %}
           <form method="post" action="/episodes/{{ ep.id }}/retry"><button class="secondary">Retry</button></form>
+        {% elif ep.status == "skipped" %}
+          <span class="muted">Übersprungen</span>
+          <form method="post" action="/episodes/{{ ep.id }}/retry" style="margin-top:0.4rem;">
+            <button type="submit" class="secondary" title="Wieder in die Warteschlange aufnehmen">Wieder aufnehmen</button>
+          </form>
         {% elif ep.status == "new" %}
           {% if ep.id in queue_positions %}
             <span class="muted">Warteschlange: Position {{ queue_positions[ep.id] }} von {{ queue_total }}</span>
