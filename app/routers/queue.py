@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session, select
 
@@ -35,4 +35,18 @@ def skip_episode(episode_id: int, session: Session = Depends(get_session)):
         episode.status = EpisodeStatus.SKIPPED
         session.add(episode)
         session.commit()
+    return RedirectResponse(url="/queue", status_code=303)
+
+
+@router.post("/queue/skip-selected")
+def skip_selected_episodes(episode_ids: list[int] = Form(default=[]), session: Session = Depends(get_session)):
+    """Same as skip_episode() but for a whole multi-selected batch at once, so working
+    through a large backlog of episodes that will never make it into the master feed
+    doesn't mean confirming a browser dialog once per episode."""
+    for episode_id in episode_ids:
+        episode = session.get(Episode, episode_id)
+        if episode:
+            episode.status = EpisodeStatus.SKIPPED
+            session.add(episode)
+    session.commit()
     return RedirectResponse(url="/queue", status_code=303)

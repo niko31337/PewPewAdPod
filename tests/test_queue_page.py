@@ -95,3 +95,59 @@ def test_skip_unknown_episode_redirects_without_error():
 
     assert response.status_code == 303
     assert response.headers["location"] == "/queue"
+
+
+def test_skip_selected_marks_only_the_chosen_episodes_and_leaves_others_queued():
+    client, engine = _make_client()
+    with Session(engine) as session:
+        feed = _make_feed(session)
+        keep = Episode(
+            feed_id=feed.id, guid="g1", title="Keep me queued", original_audio_url="https://example.test/1.mp3",
+            status=EpisodeStatus.NEW,
+        )
+        skip_a = Episode(
+            feed_id=feed.id, guid="g2", title="Skip A", original_audio_url="https://example.test/2.mp3",
+            status=EpisodeStatus.NEW,
+        )
+        skip_b = Episode(
+            feed_id=feed.id, guid="g3", title="Skip B", original_audio_url="https://example.test/3.mp3",
+            status=EpisodeStatus.REANALYZE,
+        )
+        session.add_all([keep, skip_a, skip_b])
+        session.commit()
+        for ep in (keep, skip_a, skip_b):
+            session.refresh(ep)
+        keep_id, skip_a_id, skip_b_id = keep.id, skip_a.id, skip_b.id
+
+    response = client.post(
+        "/queue/skip-selected",
+        data={"episode_ids": [skip_a_id, skip_b_id]},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/queue"
+    with Session(engine) as session:
+        assert session.get(Episode, keep_id).status == EpisodeStatus.NEW
+        assert session.get(Episode, skip_a_id).status == EpisodeStatus.SKIPPED
+        assert session.get(Episode, skip_b_id).status == EpisodeStatus.SKIPPED
+
+
+def test_skip_selected_with_no_episodes_chosen_is_a_harmless_no_op():
+    client, engine = _make_client()
+    with Session(engine) as session:
+        feed = _make_feed(session)
+        episode = Episode(
+            feed_id=feed.id, guid="g1", title="Untouched", original_audio_url="https://example.test/1.mp3",
+            status=EpisodeStatus.NEW,
+        )
+        session.add(episode)
+        session.commit()
+        session.refresh(episode)
+        episode_id = episode.id
+
+    response = client.post("/queue/skip-selected", data={}, follow_redirects=False)
+
+    assert response.status_code == 303
+    with Session(engine) as session:
+        assert session.get(Episode, episode_id).status == EpisodeStatus.NEW

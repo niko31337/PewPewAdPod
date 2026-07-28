@@ -55,6 +55,18 @@
       oder unveränderte Werbeblöcke). Leer lassen = Standard ({{ default_min_duplicate_seconds }}s).
     </p>
 
+    <div class="flex" style="margin-bottom:0.75rem;">
+      <label>Neueste Episoden je Podcast im Sammelfeed
+        <input type="number" min="1" step="1" name="master_feed_episodes_per_podcast"
+               value="{{ config.master_feed_episodes_per_podcast }}">
+      </label>
+    </div>
+    <p class="muted small">
+      Wie viele der zuletzt (nach Original-Veröffentlichungsdatum) fertig verarbeiteten Episoden jedes
+      einzelnen Podcasts im Sammelfeed <a href="/feed/master.xml">/feed/master.xml</a> auftauchen.
+      Standard: 1 (nur die jeweils neueste).
+    </p>
+
     <div class="flex" style="margin-bottom:0.25rem;">
       <label class="flex">
         <input type="checkbox" name="llm_ad_detection_enabled" value="true"

@@ -152,4 +152,5 @@ class AppConfig(SQLModel, table=True):
     max_cache_size_mb: Optional[float] = None  # None = unbegrenzt
     min_duplicate_seconds: Optional[float] = None  # None = ad_keywords.yaml-Default verwenden
     llm_ad_detection_enabled: bool = False  # ressourcenintensiv - Opt-in
+    master_feed_episodes_per_podcast: int = 1  # wie viele neueste Episoden je Podcast im Sammelfeed erscheinen
     updated_at: datetime = Field(default_factory=utcnow)

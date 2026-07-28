@@ -23,6 +23,13 @@ def _parse_optional_float(value: str) -> float | None:
     return float(value) if value else None
 
 
+def _parse_positive_int(value: str, default: int) -> int:
+    value = value.strip()
+    if not value:
+        return default
+    return max(1, int(value))
+
+
 @router.get("/config")
 def config_page(request: Request, session: Session = Depends(get_session)):
     config = cache_manager.get_or_create_config(session)
@@ -52,6 +59,7 @@ def update_config(
     max_cache_size_mb: str = Form(""),
     min_duplicate_seconds: str = Form(""),
     llm_ad_detection_enabled: bool = Form(False),
+    master_feed_episodes_per_podcast: str = Form("1"),
     session: Session = Depends(get_session),
 ):
     config = cache_manager.get_or_create_config(session)
@@ -59,6 +67,7 @@ def update_config(
     config.max_cache_size_mb = _parse_optional_float(max_cache_size_mb)
     config.min_duplicate_seconds = _parse_optional_float(min_duplicate_seconds)
     config.llm_ad_detection_enabled = llm_ad_detection_enabled
+    config.master_feed_episodes_per_podcast = _parse_positive_int(master_feed_episodes_per_podcast, default=1)
     config.updated_at = datetime.now(timezone.utc)
     session.add(config)
     session.commit()

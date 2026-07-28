@@ -2,36 +2,50 @@
 {% block content %}
 <h1>Queue</h1>
 <p class="muted">
-  Alle Episoden, die auf Verarbeitung warten ({{ rows|length }} insgesamt), in der Reihenfolge, in der sie
-  auch tatsächlich verarbeitet werden. Episoden, die ohnehin nie zur neuesten Episode ihres Podcasts werden
-  (weil bereits eine neuere veröffentlicht ist), lassen sich hier aus der Queue werfen, ohne die
-  Pipeline zu durchlaufen.
+  Alle Episoden, die auf Verarbeitung warten ({{ rows|length }} insgesamt). Die Spalte "#" zeigt die
+  tatsächliche Verarbeitungsreihenfolge und bleibt beim Sortieren nach anderen Spalten unverändert - das
+  Sortieren ist nur eine Ansichtshilfe, es ändert nicht, wann eine Episode dran ist. Episoden, die ohnehin
+  nie zur neuesten Episode ihres Podcasts werden (weil bereits eine neuere veröffentlicht ist), lassen sich
+  hier markiert auf einmal aus der Queue werfen, ohne die Pipeline zu durchlaufen.
 </p>
 
-<table>
-  <thead>
-    <tr><th>#</th><th>Podcast</th><th>Episode</th><th>Veröffentlicht</th><th>Aktion</th></tr>
-  </thead>
-  <tbody>
-  {% for row in rows %}
-    <tr>
-      <td class="muted">{{ loop.index }}</td>
-      <td>{{ row.feed_title }}</td>
-      <td>
-        {{ row.episode.title }}
-        {% if row.episode.status == "reanalyze" %}<span class="badge new">Neuanalyse</span>{% endif %}
-      </td>
-      <td class="muted">{{ row.episode.pubdate.strftime("%Y-%m-%d") if row.episode.pubdate else "" }}</td>
-      <td>
-        <form method="post" action="/episodes/{{ row.episode.id }}/skip"
-              onsubmit="return confirm('Diese Episode dauerhaft aus der Queue werfen? Sie wird nie verarbeitet und taucht bei zukünftigen Feed-Updates nicht erneut auf.');">
-          <button type="submit" class="danger">Verwerfen</button>
-        </form>
-      </td>
-    </tr>
-  {% else %}
-    <tr><td colspan="5" class="muted">Queue ist leer.</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
+<form method="post" action="/queue/skip-selected" id="queue-form"
+      onsubmit="return confirm('Ausgewählte Episoden dauerhaft aus der Queue werfen? Sie werden nie verarbeitet und tauchen bei zukünftigen Feed-Updates nicht erneut auf.');">
+  <div class="flex" style="margin-bottom:0.5rem;">
+    <button type="submit" class="danger">Ausgewählte verwerfen</button>
+    <span class="muted small" id="selected-count">0 ausgewählt</span>
+  </div>
+
+  <table id="queue-table">
+    <thead>
+      <tr>
+        <th><input type="checkbox" id="select-all" title="Alle auswählen"></th>
+        <th class="sortable" data-sort-type="num">#</th>
+        <th class="sortable" data-sort-type="text">Podcast</th>
+        <th class="sortable" data-sort-type="text">Episode</th>
+        <th class="sortable" data-sort-type="date">Veröffentlicht</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td><input type="checkbox" class="row-select" name="episode_ids" value="{{ row.episode.id }}"></td>
+        <td data-value="{{ loop.index }}">{{ loop.index }}</td>
+        <td data-value="{{ row.feed_title }}">{{ row.feed_title }}</td>
+        <td data-value="{{ row.episode.title }}">
+          {{ row.episode.title }}
+          {% if row.episode.status == "reanalyze" %}<span class="badge new">Neuanalyse</span>{% endif %}
+        </td>
+        <td data-value="{{ row.episode.pubdate.isoformat() if row.episode.pubdate else '' }}" class="muted">
+          {{ row.episode.pubdate.strftime("%Y-%m-%d") if row.episode.pubdate else "" }}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">Queue ist leer.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</form>
+
+<script src="/static/js/queue.js"></script>
 {% endblock %}
