@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-from pydub import AudioSegment
 from sqlmodel import Session, select
 
 from app.models import FeedJingleMatch
+from app.services.audio_io import load_mono_samples
 
 log = logging.getLogger(__name__)
 
@@ -76,39 +76,102 @@ def load_jingle_templates(jingles_dir: Path, target_sr: int) -> list[JingleTempl
     return templates
 
 
+_NCC_CHUNK_SAMPLES = 1_000_000
+
+
 def _sliding_window_norm(signal: np.ndarray, window_len: int) -> np.ndarray:
-    sq = signal.astype(np.float64) ** 2
-    cumsum = np.cumsum(np.insert(sq, 0, 0.0))
-    window_sums = cumsum[window_len:] - cumsum[:-window_len]
-    window_sums = np.maximum(window_sums, 1e-12)
-    return np.sqrt(window_sums)
+    """Return RMS denominators in bounded chunks.
+
+    The previous implementation created a float64 copy of the entire episode and a
+    float64 cumulative-sum array of the same size. For a multi-hour episode this can
+    consume multiple gigabytes temporarily.
+    """
+    if window_len <= 0 or len(signal) < window_len:
+        return np.array([], dtype=np.float64)
+
+    valid_len = len(signal) - window_len + 1
+    result = np.empty(valid_len, dtype=np.float64)
+    for start in range(0, valid_len, _NCC_CHUNK_SAMPLES):
+        count = min(_NCC_CHUNK_SAMPLES, valid_len - start)
+        segment = signal[start : start + count + window_len - 1].astype(np.float64, copy=False)
+        sq = segment * segment
+        cumsum = np.empty(len(sq) + 1, dtype=np.float64)
+        cumsum[0] = 0.0
+        np.cumsum(sq, out=cumsum[1:])
+        result[start : start + count] = np.sqrt(
+            np.maximum(cumsum[window_len : window_len + count] - cumsum[:count], 1e-12)
+        )
+    return result
 
 
-def normalized_cross_correlation(episode: np.ndarray, jingle: np.ndarray) -> np.ndarray:
-    """Normalized cross-correlation of `jingle` against every offset in `episode`.
-    Returns an array of scores in roughly [-1, 1] (1.0 = perfect match), indexed by
-    the sample offset in `episode` where the jingle window starts."""
+def _iter_normalized_cross_correlation(episode: np.ndarray, jingle: np.ndarray):
+    """Yield NCC chunks, keeping FFT and normalization temporaries bounded."""
     if len(episode) < len(jingle) or len(jingle) == 0:
-        return np.array([])
-
+        return
+    jingle = jingle.astype(np.float32, copy=False)
     jingle = jingle - jingle.mean()
     jingle_norm = float(np.linalg.norm(jingle))
     if jingle_norm < 1e-9:
-        return np.array([])
+        return
 
-    n = len(episode) + len(jingle) - 1
-    fft_size = 1 << (n - 1).bit_length()
-
-    episode_fft = np.fft.rfft(episode, fft_size)
-    jingle_fft = np.fft.rfft(jingle[::-1], fft_size)
-    corr_full = np.fft.irfft(episode_fft * jingle_fft, fft_size)[:n]
-
-    start_idx = len(jingle) - 1
     valid_len = len(episode) - len(jingle) + 1
-    corr_valid = corr_full[start_idx : start_idx + valid_len]
+    reversed_jingle = jingle[::-1]
+    for start in range(0, valid_len, _NCC_CHUNK_SAMPLES):
+        count = min(_NCC_CHUNK_SAMPLES, valid_len - start)
+        segment = episode[start : start + count + len(jingle)].astype(np.float32, copy=False)
+        n = len(segment) + len(jingle) - 1
+        fft_size = 1 << (n - 1).bit_length()
+        episode_fft = np.fft.rfft(segment, fft_size)
+        jingle_fft = np.fft.rfft(reversed_jingle, fft_size)
+        corr_full = np.fft.irfft(episode_fft * jingle_fft, fft_size)
+        corr = corr_full[len(jingle) - 1 : len(jingle) - 1 + count]
 
-    local_norms = _sliding_window_norm(episode, len(jingle))
-    return corr_valid / (local_norms * jingle_norm)
+        seg64 = segment.astype(np.float64, copy=False)
+        sq = seg64 * seg64
+        cumsum = np.empty(len(sq) + 1, dtype=np.float64)
+        cumsum[0] = 0.0
+        np.cumsum(sq, out=cumsum[1:])
+        norms = np.sqrt(np.maximum(cumsum[len(jingle) : len(jingle) + count] - cumsum[:count], 1e-12))
+        yield corr.astype(np.float32, copy=False) / (norms * jingle_norm)
+
+
+def normalized_cross_correlation(episode: np.ndarray, jingle: np.ndarray) -> np.ndarray:
+    """Normalized cross-correlation with bounded working memory.
+
+    API-compatible array result; production matching uses the streaming helper below
+    so it does not need to retain this full array.
+    """
+    chunks = list(_iter_normalized_cross_correlation(episode, jingle))
+    if not chunks:
+        return np.array([])
+    return np.concatenate(chunks)
+
+
+def _find_peaks_chunks(chunks, threshold: float, min_gap_samples: int):
+    """Find peaks from NCC chunks without retaining the full NCC array."""
+    peaks: list[tuple[int, float]] = []
+    cluster_best_idx: int | None = None
+    cluster_best_score = 0.0
+    prev_idx: int | None = None
+    offset = 0
+    for chunk in chunks:
+        idx = np.where(chunk >= threshold)[0]
+        for local_idx in idx:
+            absolute_idx = offset + int(local_idx)
+            score = float(chunk[local_idx])
+            if prev_idx is None or absolute_idx - prev_idx > max(min_gap_samples, 1):
+                if cluster_best_idx is not None:
+                    peaks.append((cluster_best_idx, cluster_best_score))
+                cluster_best_idx = absolute_idx
+                cluster_best_score = score
+            elif score > cluster_best_score:
+                cluster_best_idx = absolute_idx
+                cluster_best_score = score
+            prev_idx = absolute_idx
+        offset += len(chunk)
+    if cluster_best_idx is not None:
+        peaks.append((cluster_best_idx, cluster_best_score))
+    return peaks
 
 
 def _find_peaks(ncc: np.ndarray, threshold: float, min_gap_samples: int) -> list[tuple[int, float]]:
@@ -133,11 +196,12 @@ def _find_peaks(ncc: np.ndarray, threshold: float, min_gap_samples: int) -> list
 
 
 def match_template(episode_samples: np.ndarray, template: JingleTemplate, match_threshold: float) -> list[JingleHit]:
-    ncc = normalized_cross_correlation(episode_samples, template.samples)
-    if ncc.size == 0:
-        return []
     min_gap_samples = int(template.duration_s * template.sample_rate * 0.5)
-    peaks = _find_peaks(ncc, match_threshold, min_gap_samples)
+    peaks = _find_peaks_chunks(
+        _iter_normalized_cross_correlation(episode_samples, template.samples),
+        match_threshold,
+        min_gap_samples,
+    )
     return [
         JingleHit(
             jingle_filename=template.filename,
@@ -164,7 +228,7 @@ def order_templates_for_feed(
 def find_jingle_hits(
     session: Session,
     feed_id: int,
-    audio: AudioSegment,
+    audio_path: Path,
     jingles_dir: Path,
     target_sample_rate: int,
     match_threshold: float,
@@ -174,10 +238,9 @@ def find_jingle_hits(
     if not templates:
         return []
 
-    episode_seg = audio.set_channels(1).set_frame_rate(target_sample_rate)
-    episode_samples = np.array(episode_seg.get_array_of_samples()).astype(np.float32)
-    max_val = float(1 << (8 * episode_seg.sample_width - 1))
-    episode_samples = episode_samples / max_val
+    # Decode directly to the small matching sample rate. Do not retain the large
+    # 16-kHz pydub AudioSegment used later for silence/RMS scoring.
+    episode_samples = load_mono_samples(audio_path, target_sample_rate)
 
     known, unknown = order_templates_for_feed(session, feed_id, templates)
 
@@ -194,7 +257,6 @@ def find_jingle_hits(
             hits.extend(match_template(episode_samples, template, match_threshold))
 
     return hits
-
 
 def record_jingle_match(session: Session, feed_id: int, jingle_filename: str) -> None:
     row = session.exec(

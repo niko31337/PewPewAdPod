@@ -51,3 +51,23 @@ def test_find_peaks_clusters_nearby_indices_into_one():
     idxs = sorted(p[0] for p in peaks)
     assert idxs[0] == 42
     assert idxs[1] == 80
+
+
+def test_normalized_cross_correlation_chunked_matches_reference():
+    import app.services.jingle_detector as detector
+    rng = np.random.default_rng(123)
+    episode = rng.normal(size=250_000).astype(np.float32)
+    jingle = rng.normal(size=1_234).astype(np.float32)
+    n = len(episode) + len(jingle) - 1
+    fft_size = 1 << (n - 1).bit_length()
+    ep_fft = np.fft.rfft(episode, fft_size)
+    centered = jingle - jingle.mean()
+    j_fft = np.fft.rfft(centered[::-1], fft_size)
+    corr = np.fft.irfft(ep_fft * j_fft, fft_size)[:n]
+    valid = corr[len(jingle) - 1 : len(jingle) - 1 + len(episode) - len(jingle) + 1]
+    sq = episode.astype(np.float64) ** 2
+    cs = np.cumsum(np.insert(sq, 0, 0.0))
+    norms = np.sqrt(np.maximum(cs[len(jingle):] - cs[:-len(jingle)], 1e-12))
+    reference = valid / (norms * float(np.linalg.norm(centered)))
+    actual = detector.normalized_cross_correlation(episode, jingle)
+    np.testing.assert_allclose(actual, reference, rtol=2e-5, atol=2e-5)

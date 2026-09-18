@@ -10,6 +10,7 @@ from pydub import AudioSegment
 from pydub.silence import detect_silence
 from sqlmodel import Session
 
+from app.services import audio_editor
 from app.services import audio_io, beat_detector, cache_manager, fingerprint, jingle_detector, llm_detector
 from app.services.beat_detector import BeatWindow
 from app.services.jingle_detector import JingleHit
@@ -535,9 +536,10 @@ def detect_ad_segments(
 ) -> list[Candidate]:
     episode_label = audio_path.stem
     config = load_keyword_config(config_path)
-    with _log_stage(episode_label, "audio load"):
-        audio = audio_io.load_audio_segment(audio_path)
-        audio_duration_s = len(audio) / 1000.0
+    with _log_stage(episode_label, "audio metadata load"):
+        audio_duration_s = audio_editor.get_duration_seconds(audio_path)
+        if audio_duration_s is None:
+            raise RuntimeError(f"Could not determine audio duration for {audio_path}")
 
     app_config = None
     if session is not None:
@@ -551,7 +553,7 @@ def detect_ad_segments(
             jingle_hits = jingle_detector.find_jingle_hits(
                 session,
                 feed_id,
-                audio,
+                audio_path,
                 jingles_dir,
                 config.jingles.target_sample_rate,
                 config.jingles.match_threshold,
@@ -620,6 +622,11 @@ def detect_ad_segments(
                 )
 
     with _log_stage(episode_label, "scoring candidates"):
+        # Only now load the 16-kHz AudioSegment required by silence/RMS scoring.
+        # All memory-heavy detectors above operate directly from their own bounded
+        # sample-rate representations, so those arrays can be reclaimed before this
+        # comparatively large object is created.
+        audio = audio_io.load_audio_segment(audio_path)
         candidates = merge_candidates(
             jingle_candidates + keyword_candidates + duplicate_candidates + beat_candidates + llm_candidates,
             int(config.window.merge_gap_seconds * 1000),
