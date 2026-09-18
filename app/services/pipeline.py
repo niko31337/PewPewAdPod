@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import inspect as sa_inspect
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -202,22 +203,44 @@ def _analyze_and_finalize(
 
 
 def _mark_failed(session: Session, episode: Episode, exc: Exception) -> None:
-    log.exception("Pipeline failed for episode %s at status=%s", episode.id, episode.status)
+    # A failed flush/commit leaves SQLAlchemy's Session in PendingRollbackError.
+    # Never read episode.status from that expired ORM object before rollback: doing so
+    # can trigger another SELECT and mask the original exception with a second error.
+    episode_id = sa_inspect(episode).identity[0]
+    try:
+        session.rollback()
+        failed_episode = session.get(Episode, episode_id)
+    except Exception:
+        log.exception("Could not reload episode %s after pipeline failure", episode_id)
+        raise
+
+    current_status = failed_episode.status if failed_episode is not None else None
+    log.exception("Pipeline failed for episode %s at status=%s", episode_id, current_status)
+
     failed_status = {
         EpisodeStatus.DOWNLOADING: EpisodeStatus.FAILED_DOWNLOAD,
         EpisodeStatus.TRANSCRIBING: EpisodeStatus.FAILED_TRANSCRIBE,
         EpisodeStatus.ANALYZING: EpisodeStatus.FAILED_ANALYZE,
         EpisodeStatus.CUTTING: EpisodeStatus.FAILED_CUT,
-    }.get(episode.status, EpisodeStatus.FAILED_DOWNLOAD)
+    }.get(current_status, EpisodeStatus.FAILED_DOWNLOAD)
 
-    episode.status = failed_status
-    episode.error_message = str(exc)
-    episode.retry_count += 1
-    if episode.retry_count >= settings.max_retries:
-        episode.status = EpisodeStatus.ERROR_PERMANENT
-    episode.updated_at = _now()
-    session.add(episode)
-    session.commit()
+    if failed_episode is None:
+        log.error("Episode %s disappeared while handling pipeline failure", episode_id)
+        return
+
+    failed_episode.status = failed_status
+    failed_episode.error_message = str(exc)
+    failed_episode.retry_count += 1
+    if failed_episode.retry_count >= settings.max_retries:
+        failed_episode.status = EpisodeStatus.ERROR_PERMANENT
+    failed_episode.updated_at = _now()
+    session.add(failed_episode)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        log.exception("Could not persist failure state for episode %s", episode_id)
+        raise
 
 
 def process_episode(episode_id: int) -> None:
@@ -360,12 +383,31 @@ def recover_interrupted_episodes(session: Session) -> int:
 
 
 def _mark_correction_failed(session: Session, episode: Episode, exc: Exception) -> None:
-    log.exception("Correction processing failed for episode %s", episode.id)
-    episode.correction_status = CorrectionStatus.FAILED
-    episode.correction_error_message = str(exc)
-    episode.updated_at = _now()
-    session.add(episode)
-    session.commit()
+    # Same PendingRollbackError trap as the normal pipeline failure handler: do not
+    # access expired ORM attributes until the failed transaction has been rolled back.
+    episode_id = sa_inspect(episode).identity[0]
+    try:
+        session.rollback()
+        failed_episode = session.get(Episode, episode_id)
+    except Exception:
+        log.exception("Could not reload episode %s after correction failure", episode_id)
+        raise
+
+    log.exception("Correction processing failed for episode %s", episode_id)
+    if failed_episode is None:
+        log.error("Episode %s disappeared while handling correction failure", episode_id)
+        return
+
+    failed_episode.correction_status = CorrectionStatus.FAILED
+    failed_episode.correction_error_message = str(exc)
+    failed_episode.updated_at = _now()
+    session.add(failed_episode)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        log.exception("Could not persist correction failure state for episode %s", episode_id)
+        raise
 
 
 def process_episode_correction(episode_id: int) -> None:

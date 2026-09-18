@@ -151,10 +151,22 @@ def poll_feed(session: Session, feed: Feed) -> int:
 
 
 def poll_all_feeds() -> None:
+    # Keep the transaction lifetime per feed short. The HTTP parse/download work can
+    # take a long time, and sharing one Session across dozens of feeds can leave a
+    # SQLite write transaction open while the next feed is being fetched. That
+    # contends with process_queue_job/correction_queue_job and can surface as
+    # "database is locked".
     with session_scope() as session:
-        feeds = session.exec(select(Feed).where(Feed.active == True)).all()  # noqa: E712
-        for feed in feeds:
-            try:
+        feed_ids = list(session.exec(select(Feed.id).where(Feed.active == True)).all())  # noqa: E712
+
+    for feed_id in feed_ids:
+        try:
+            with session_scope() as session:
+                feed = session.get(Feed, feed_id)
+                if feed is None or not feed.active:
+                    continue
                 poll_feed(session, feed)
-            except Exception:
-                log.exception("Error polling feed %s", feed.id)
+        except Exception:
+            # The failed feed gets its own rolled-back/closed Session, so one bad feed
+            # cannot poison the Session used for all following feeds.
+            log.exception("Error polling feed %s", feed_id)
