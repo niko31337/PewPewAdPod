@@ -27,11 +27,15 @@ def _log_stage(episode_label: str, stage: str):
     the logs with no way to tell which of its five signals (jingle/keyword/duplicate/
     beat/LLM detection) is actually the slow one. Brackets each stage with a start/end
     log line instead."""
+    from app.services.memory_diagnostics import log_memory
+
     start = time.monotonic()
     log.info("Episode %s: starting %s", episode_label, stage)
+    log_memory(log, f"episode={episode_label} stage={stage} BEFORE")
     try:
         yield
     finally:
+        log_memory(log, f"episode={episode_label} stage={stage} AFTER")
         log.info("Episode %s: finished %s (%.1fs)", episode_label, stage, time.monotonic() - start)
 
 

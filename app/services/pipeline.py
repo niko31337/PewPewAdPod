@@ -253,6 +253,8 @@ def process_episode(episode_id: int) -> None:
             feed = session.get(Feed, episode.feed_id)
 
             try:
+                from app.services.memory_diagnostics import log_memory
+                log_memory(log, f"episode={episode.id} pipeline START")
                 _set_status(session, episode, EpisodeStatus.DOWNLOADING)
                 path = downloader.download_file(episode.original_audio_url, _originals_path(episode.id))
                 episode.original_audio_path = str(path)
@@ -268,10 +270,14 @@ def process_episode(episode_id: int) -> None:
                         session.commit()
 
                 _set_status(session, episode, EpisodeStatus.TRANSCRIBING)
+                log_memory(log, f"episode={episode.id} BEFORE transcribe")
                 transcript = transcriber.transcribe_audio(path)
+                log_memory(log, f"episode={episode.id} AFTER transcribe segments={len(transcript)}")
                 transcriber.save_transcript_json(episode.id, transcript)
+                log_memory(log, f"episode={episode.id} AFTER save transcript")
 
                 _analyze_and_finalize(session, episode, feed, path, transcript)
+                log_memory(log, f"episode={episode.id} AFTER analyze/finalize")
 
             except Exception as exc:
                 _mark_failed(session, episode, exc)

@@ -240,7 +240,10 @@ def find_jingle_hits(
 
     # Decode directly to the small matching sample rate. Do not retain the large
     # 16-kHz pydub AudioSegment used later for silence/RMS scoring.
+    from app.services.memory_diagnostics import log_memory
+
     episode_samples = load_mono_samples(audio_path, target_sample_rate)
+    log_memory(log, f"episode={audio_path.stem} jingle samples n={len(episode_samples)} bytes={episode_samples.nbytes}")
 
     known, unknown = order_templates_for_feed(session, feed_id, templates)
 
