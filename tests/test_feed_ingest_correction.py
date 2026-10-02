@@ -113,17 +113,14 @@ def test_poll_feed_detects_replaced_enclosure_on_second_poll(tmp_path, monkeypat
     session = _make_session()
     feed = _make_feed(session)
 
-    # poll_feed always re-fetches feed.original_rss_url via feedparser.parse(); patch it to
-    # return our crafted XML directly, keeping this test fully offline.
-    import feedparser
+    # poll_feed always re-downloads feed.original_rss_url; patch the download to return
+    # our crafted XML directly, keeping this test fully offline.
     from sqlmodel import select
 
     from app.services import feed_ingest
 
-    original_parse = feedparser.parse
-
     first_xml = RSS_TEMPLATE.format(audio_url="https://example.test/episode1_v1.mp3")
-    monkeypatch.setattr(feedparser, "parse", lambda *_a, **_kw: original_parse(first_xml))
+    monkeypatch.setattr(feed_ingest, "_fetch_feed_content", lambda _url: first_xml.encode())
     feed_ingest.poll_feed(session, feed)
 
     episode = session.exec(select(Episode).where(Episode.feed_id == feed.id)).first()
@@ -137,7 +134,7 @@ def test_poll_feed_detects_replaced_enclosure_on_second_poll(tmp_path, monkeypat
     session.commit()
 
     second_xml = RSS_TEMPLATE.format(audio_url="https://example.test/episode1_v2_fixed.mp3")
-    monkeypatch.setattr(feedparser, "parse", lambda *_a, **_kw: original_parse(second_xml))
+    monkeypatch.setattr(feed_ingest, "_fetch_feed_content", lambda _url: second_xml.encode())
     feed_ingest.poll_feed(session, feed)
 
     session.refresh(episode)
