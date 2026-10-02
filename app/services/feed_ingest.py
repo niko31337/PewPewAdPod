@@ -1,8 +1,10 @@
 import logging
+import time
 from datetime import datetime, timezone
 from time import mktime
 
 import feedparser
+import httpx
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -96,11 +98,50 @@ def _handle_possible_correction(session: Session, episode: Episode, new_audio_ur
     session.commit()
 
 
+_FEED_FETCH_TIMEOUT = httpx.Timeout(30.0)
+_FEED_FETCH_DEADLINE_S = 90.0
+_FEED_ACCEPT = (
+    "application/atom+xml,application/rdf+xml,application/rss+xml,application/xml;q=0.9,"
+    "text/xml;q=0.2,*/*;q=0.1"
+)
+
+
+def _fetch_feed_content(url: str) -> bytes | None:
+    """Downloads the raw feed document with real timeouts. feedparser.parse(url) does its
+    own HTTP via urllib with NO timeout, so a server that accepts the connection and then
+    never answers hangs the call forever - and since poll_feeds_job allows a single
+    instance, one such feed silently stops all polling (every later run is logged as
+    "skipped: maximum number of running instances reached"). The per-read timeout alone
+    doesn't stop a server that trickles bytes, hence the overall deadline too."""
+    try:
+        deadline = time.monotonic() + _FEED_FETCH_DEADLINE_S
+        chunks: list[bytes] = []
+        with httpx.stream(
+            "GET",
+            url,
+            follow_redirects=True,
+            timeout=_FEED_FETCH_TIMEOUT,
+            headers={"User-Agent": feedparser.USER_AGENT, "Accept": _FEED_ACCEPT},
+        ) as response:
+            response.raise_for_status()
+            for chunk in response.iter_bytes():
+                chunks.append(chunk)
+                if time.monotonic() > deadline:
+                    raise httpx.ReadTimeout(f"feed download exceeded {_FEED_FETCH_DEADLINE_S:.0f}s")
+        return b"".join(chunks)
+    except httpx.HTTPError as exc:
+        log.warning("Could not fetch feed %s: %s", url, exc)
+        return None
+
+
 def poll_feed(session: Session, feed: Feed) -> int:
     """Poll a single feed, create Episode rows for new entries (and flag replaced audio
     on already-known ones as a correction). Returns count of new episodes."""
     log.info("Polling feed %s (%s)", feed.id, feed.original_rss_url)
-    parsed = feedparser.parse(feed.original_rss_url)
+    content = _fetch_feed_content(feed.original_rss_url)
+    if content is None:
+        return 0
+    parsed = feedparser.parse(content)
     if parsed.bozo and not parsed.entries:
         log.warning("Feed %s failed to parse: %s", feed.id, getattr(parsed, "bozo_exception", "unknown"))
         return 0
@@ -158,3 +199,4 @@ def poll_all_feeds() -> None:
                 poll_feed(session, feed)
             except Exception:
                 log.exception("Error polling feed %s", feed.id)
+        log.info("Finished polling %d active feed(s)", len(feeds))
