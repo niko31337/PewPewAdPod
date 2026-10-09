@@ -25,7 +25,13 @@ def _queue_positions(session: Session) -> dict[int, int]:
 
 
 @router.get("/feeds/{feed_id}")
-def feed_detail(feed_id: int, request: Request, session: Session = Depends(get_session)):
+def feed_detail(
+    feed_id: int,
+    request: Request,
+    requeued: int | None = None,
+    requeue_skipped: int | None = None,
+    session: Session = Depends(get_session),
+):
     feed = session.get(Feed, feed_id)
     if feed is None:
         return RedirectResponse(url="/", status_code=303)
@@ -45,6 +51,8 @@ def feed_detail(feed_id: int, request: Request, session: Session = Depends(get_s
             "default_threshold": settings.default_auto_cut_threshold,
             "queue_positions": positions,
             "queue_total": len(positions),
+            "requeued": requeued,
+            "requeue_skipped": requeue_skipped,
         },
     )
 

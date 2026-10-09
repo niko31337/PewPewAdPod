@@ -2,6 +2,17 @@
 {% block content %}
 <h1>Feeds</h1>
 
+{% if requeued is not none %}
+<div class="card" role="status">
+  {% if requeued > 0 %}
+    <p><strong>{{ requeued }} Review-Episode(n) zur erneuten Verarbeitung eingereiht.</strong></p>
+    <p class="muted small">Die normale Warteschlange analysiert sie erneut und veröffentlicht sie bei erfolgreichem Auto-Cut.</p>
+  {% else %}
+    <p>Keine passenden Review-Episoden gefunden.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if opml_imported is not none %}
 <div class="card">
   {% if opml_imported > 0 %}
@@ -69,7 +80,8 @@
     <div class="flex bulk-feed-actions">
       <button type="submit" name="action" value="activate">Aktivieren</button>
       <button type="submit" name="action" value="deactivate" class="secondary">Deaktivieren</button>
-      <button type="submit" name="action" value="enable_auto_cut">Auto-Cut an</button>
+      <button type="submit" name="action" value="enable_auto_cut">Auto-Cut an + Review nachholen</button>
+      <button type="submit" name="action" value="reprocess_review" class="secondary" onclick="return confirm('Review-Episoden der ausgewählten Auto-Cut-Feeds erneut einreihen?');">Review-Episoden nachholen</button>
       <button type="submit" name="action" value="disable_auto_cut" class="secondary">Auto-Cut aus</button>
       <button type="submit" name="action" value="toggle_auto_cut" class="secondary">Auto-Cut umschalten</button>
       <button type="submit" name="action" value="set_preferred">Als bevorzugt markieren</button>
@@ -125,7 +137,14 @@
         {{ "Deaktivieren" if feed.active else "Aktivieren" }}
       </button>
     </form>
-    <form method="post" action="/feeds/{{ feed.id }}/toggle-auto-cut"><button class="secondary">Auto-Cut umschalten</button></form>
+    <form method="post" action="/feeds/{{ feed.id }}/toggle-auto-cut" {% if not feed.auto_cut %}onsubmit="return confirm('Auto-Cut aktivieren und vorhandene Review-Episoden zur erneuten Verarbeitung einreihen?');"{% endif %}>
+      <button class="secondary">{{ "Auto-Cut deaktivieren" if feed.auto_cut else "Auto-Cut aktivieren + Review nachholen" }}</button>
+    </form>
+    {% if feed.auto_cut %}
+    <form method="post" action="/feeds/{{ feed.id }}/reprocess-review" onsubmit="return confirm('Alle vorhandenen Review-Episoden dieses Feeds erneut verarbeiten?');">
+      <button class="secondary">Review-Episoden nachholen</button>
+    </form>
+    {% endif %}
     <form method="post" action="/feeds/{{ feed.id }}/delete" onsubmit="return confirm('Feed wirklich löschen?');"><button class="danger">Löschen</button></form>
   </div>
 </div>

@@ -2,6 +2,18 @@
 {% block content %}
 <p><a href="/">&larr; Alle Feeds</a></p>
 <h1>{{ feed.title }}</h1>
+{% if requeued is not none %}
+<div class="card" role="status">
+  {% if requeued > 0 %}
+    <p><strong>{{ requeued }} Review-Episode(n) zur erneuten Verarbeitung eingereiht.</strong></p>
+    <p class="muted small">Die normale Warteschlange analysiert sie erneut und veröffentlicht sie bei erfolgreichem Auto-Cut.</p>
+  {% else %}
+    <p>Keine Review-Episoden zum Nachholen gefunden.</p>
+  {% endif %}
+</div>
+{% elif requeue_skipped %}
+<div class="card" role="status"><p>Auto-Cut ist deaktiviert. Aktiviere Auto-Cut zuerst, damit Review-Episoden automatisch geschnitten und veröffentlicht werden.</p></div>
+{% endif %}
 <p class="muted">{{ feed.original_rss_url }}</p>
 <p>
   <span class="badge {{ 'published' if feed.active else '' }}">
@@ -20,7 +32,14 @@
       {{ "Deaktivieren" if feed.active else "Aktivieren" }}
     </button>
   </form>
-  <form method="post" action="/feeds/{{ feed.id }}/toggle-auto-cut"><button class="secondary">Auto-Cut umschalten</button></form>
+  <form method="post" action="/feeds/{{ feed.id }}/toggle-auto-cut" {% if not feed.auto_cut %}onsubmit="return confirm('Auto-Cut aktivieren und vorhandene Review-Episoden zur erneuten Verarbeitung einreihen?');"{% endif %}>
+    <button class="secondary">{{ "Auto-Cut deaktivieren" if feed.auto_cut else "Auto-Cut aktivieren + Review nachholen" }}</button>
+  </form>
+  {% if feed.auto_cut %}
+  <form method="post" action="/feeds/{{ feed.id }}/reprocess-review" onsubmit="return confirm('Alle vorhandenen Review-Episoden dieses Feeds erneut verarbeiten?');">
+    <button class="secondary">Review-Episoden nachholen</button>
+  </form>
+  {% endif %}
 </div>
 
 <div class="card" style="margin-bottom: 1rem;">

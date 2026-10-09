@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.database import get_session
-from app.models import AdSegment, Episode, Feed
+from app.models import AdSegment, Episode, EpisodeStatus, Feed, utcnow
 from app.services import cache_manager, feed_ingest
 from app.templating import templates
 
@@ -15,8 +15,33 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _queue_pending_review_episodes(session: Session, feed_ids: set[int] | list[int]) -> int:
+    """Queue pending-review episodes for normal analysis and Auto-Cut processing."""
+    selected_ids = sorted({feed_id for feed_id in feed_ids if feed_id is not None})
+    if not selected_ids:
+        return 0
+
+    episodes = session.exec(
+        select(Episode)
+        .where(Episode.feed_id.in_(selected_ids))
+        .where(Episode.status == EpisodeStatus.PENDING_REVIEW)
+    ).all()
+    now = utcnow()
+    for episode in episodes:
+        episode.status = EpisodeStatus.REANALYZE
+        episode.error_message = None
+        episode.updated_at = now
+        session.add(episode)
+    return len(episodes)
+
+
 @router.get("/")
-def index(request: Request, opml_imported: int | None = None, session: Session = Depends(get_session)):
+def index(
+    request: Request,
+    opml_imported: int | None = None,
+    requeued: int | None = None,
+    session: Session = Depends(get_session),
+):
     feeds = session.exec(select(Feed).order_by(Feed.created_at)).all()
     feed_exposure_mode = cache_manager.get_or_create_config(session).feed_exposure_mode
     return templates.TemplateResponse(
@@ -27,6 +52,7 @@ def index(request: Request, opml_imported: int | None = None, session: Session =
             "default_threshold": settings.default_auto_cut_threshold,
             "opml_imported": opml_imported,
             "feed_exposure_mode": feed_exposure_mode,
+            "requeued": requeued,
         },
     )
 
@@ -81,9 +107,26 @@ def toggle_auto_cut(feed_id: int, session: Session = Depends(get_session)):
     feed = session.get(Feed, feed_id)
     if feed:
         feed.auto_cut = not feed.auto_cut
+        requeued_count = _queue_pending_review_episodes(session, [feed_id]) if feed.auto_cut else None
         session.add(feed)
         session.commit()
+        if requeued_count is not None:
+            return RedirectResponse(url=f"/feeds/{feed_id}?requeued={requeued_count}", status_code=303)
     return RedirectResponse(url=f"/feeds/{feed_id}", status_code=303)
+
+
+@router.post("/feeds/{feed_id}/reprocess-review")
+def reprocess_review_episodes(feed_id: int, session: Session = Depends(get_session)):
+    """Requeue existing review episodes when Auto-Cut is already enabled."""
+    feed = session.get(Feed, feed_id)
+    if feed is None:
+        return RedirectResponse(url="/", status_code=303)
+    if not feed.auto_cut:
+        return RedirectResponse(url=f"/feeds/{feed_id}?requeue_skipped=1", status_code=303)
+
+    requeued_count = _queue_pending_review_episodes(session, [feed_id])
+    session.commit()
+    return RedirectResponse(url=f"/feeds/{feed_id}?requeued={requeued_count}", status_code=303)
 
 
 @router.post("/feeds/{feed_id}/toggle-active")
@@ -114,12 +157,15 @@ def bulk_action(
         "disable_auto_cut",
         "set_preferred",
         "clear_preferred",
+        "reprocess_review",
     }
     if action not in allowed_actions or not feed_ids:
         return RedirectResponse(url="/", status_code=303)
 
     feeds = session.exec(select(Feed).where(Feed.id.in_(feed_ids))).all()
     selected = {feed.id for feed in feeds}
+    feeds_to_requeue: set[int] = set()
+    report_requeued = action in {"enable_auto_cut", "reprocess_review"}
 
     for feed in feeds:
         if action == "activate":
@@ -128,18 +174,31 @@ def bulk_action(
             feed.active = False
         elif action == "toggle_auto_cut":
             feed.auto_cut = not feed.auto_cut
+            if feed.auto_cut and feed.id is not None:
+                feeds_to_requeue.add(feed.id)
+                report_requeued = True
         elif action == "enable_auto_cut":
+            # Also catch up feeds that already had Auto-Cut enabled.
             feed.auto_cut = True
+            if feed.id is not None:
+                feeds_to_requeue.add(feed.id)
         elif action == "disable_auto_cut":
             feed.auto_cut = False
         elif action == "set_preferred":
             feed.preferred = True
         elif action == "clear_preferred":
             feed.preferred = False
+        elif action == "reprocess_review":
+            # Do not enable Auto-Cut implicitly; manual-review feeds are skipped.
+            if feed.auto_cut and feed.id is not None:
+                feeds_to_requeue.add(feed.id)
         session.add(feed)
 
+    requeued_count = _queue_pending_review_episodes(session, feeds_to_requeue)
     session.commit()
     log.info("Bulk action %s applied to feeds %s", action, sorted(selected))
+    if report_requeued:
+        return RedirectResponse(url=f"/?requeued={requeued_count}", status_code=303)
     return RedirectResponse(url="/", status_code=303)
 
 
