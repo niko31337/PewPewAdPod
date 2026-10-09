@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.database import get_session
 from app.models import AdSegment, Episode, Feed
-from app.services import feed_ingest
+from app.services import cache_manager, feed_ingest
 from app.templating import templates
 
 log = logging.getLogger(__name__)
@@ -18,6 +18,7 @@ router = APIRouter()
 @router.get("/")
 def index(request: Request, opml_imported: int | None = None, session: Session = Depends(get_session)):
     feeds = session.exec(select(Feed).order_by(Feed.created_at)).all()
+    feed_exposure_mode = cache_manager.get_or_create_config(session).feed_exposure_mode
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -25,6 +26,7 @@ def index(request: Request, opml_imported: int | None = None, session: Session =
             "feeds": feeds,
             "default_threshold": settings.default_auto_cut_threshold,
             "opml_imported": opml_imported,
+            "feed_exposure_mode": feed_exposure_mode,
         },
     )
 
@@ -95,6 +97,60 @@ def toggle_active(feed_id: int, session: Session = Depends(get_session)):
         session.add(feed)
         session.commit()
     return RedirectResponse(url=f"/feeds/{feed_id}", status_code=303)
+
+
+@router.post("/feeds/bulk-action")
+def bulk_action(
+    action: str = Form(...),
+    feed_ids: list[int] = Form(default=[]),
+    session: Session = Depends(get_session),
+):
+    """Apply one safe bulk operation to the selected feeds."""
+    allowed_actions = {
+        "activate",
+        "deactivate",
+        "toggle_auto_cut",
+        "enable_auto_cut",
+        "disable_auto_cut",
+        "set_preferred",
+        "clear_preferred",
+    }
+    if action not in allowed_actions or not feed_ids:
+        return RedirectResponse(url="/", status_code=303)
+
+    feeds = session.exec(select(Feed).where(Feed.id.in_(feed_ids))).all()
+    selected = {feed.id for feed in feeds}
+
+    for feed in feeds:
+        if action == "activate":
+            feed.active = True
+        elif action == "deactivate":
+            feed.active = False
+        elif action == "toggle_auto_cut":
+            feed.auto_cut = not feed.auto_cut
+        elif action == "enable_auto_cut":
+            feed.auto_cut = True
+        elif action == "disable_auto_cut":
+            feed.auto_cut = False
+        elif action == "set_preferred":
+            feed.preferred = True
+        elif action == "clear_preferred":
+            feed.preferred = False
+        session.add(feed)
+
+    session.commit()
+    log.info("Bulk action %s applied to feeds %s", action, sorted(selected))
+    return RedirectResponse(url="/", status_code=303)
+
+
+@router.post("/feeds/{feed_id}/toggle-preferred")
+def toggle_preferred(feed_id: int, session: Session = Depends(get_session)):
+    feed = session.get(Feed, feed_id)
+    if feed:
+        feed.preferred = not feed.preferred
+        session.add(feed)
+        session.commit()
+    return RedirectResponse(url="/", status_code=303)
 
 
 @router.post("/feeds/{feed_id}/update-threshold")

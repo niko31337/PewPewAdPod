@@ -70,6 +70,7 @@ def build_master_feed_xml(
     base_url: str,
     master_cover_url: str,
     feed_path: str = "feed/master.xml",
+    preferred_first: bool = False,
 ) -> bytes:
     """entries: (feed, episode, episode_image_url) tuples, one per source feed's latest
     published episode - already resolved by the caller (incl. watermarking fallback).
@@ -94,7 +95,14 @@ def build_master_feed_xml(
     fg.podcast.itunes_image(master_cover_url)
     fg.podcast.itunes_author("PewPewAdPod")
 
-    sorted_entries = sorted(entries, key=lambda t: t[1].pubdate or t[1].created_at, reverse=True)
+    if preferred_first:
+        sorted_entries = sorted(
+            entries,
+            key=lambda t: (t[0].preferred, t[1].pubdate or t[1].created_at),
+            reverse=True,
+        )
+    else:
+        sorted_entries = sorted(entries, key=lambda t: t[1].pubdate or t[1].created_at, reverse=True)
 
     for feed, ep, image_url in sorted_entries:
         fe = fg.add_entry()

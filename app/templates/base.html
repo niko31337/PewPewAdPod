@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="de" class="{% if ui_theme == "dark" %}theme-dark{% endif %}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,6 +20,9 @@
     </div>
   </nav>
   <hr>
+  {% if request.url.path == "/queue" %}
+    {% include "_playlist.html" %}
+  {% endif %}
   {% block content %}{% endblock %}
   <script src="/static/js/progress.js"></script>
   {% block scripts %}{% endblock %}

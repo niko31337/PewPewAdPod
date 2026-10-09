@@ -67,6 +67,46 @@
       Standard: 1 (nur die jeweils neueste).
     </p>
 
+    <div class="ui-theme-options" style="margin-bottom:0.9rem;">
+      <strong>Web-Oberfläche</strong>
+      <div class="feed-mode-options" style="margin-top:0.45rem;">
+        <label class="feed-mode-option">
+          <input type="radio" name="ui_theme" value="light"
+                 {% if config.ui_theme == "light" %}checked{% endif %}>
+          <span><strong>Hell</strong><br><span class="muted small">Helle Standardansicht.</span></span>
+        </label>
+        <label class="feed-mode-option">
+          <input type="radio" name="ui_theme" value="dark"
+                 {% if config.ui_theme == "dark" %}checked{% endif %}>
+          <span><strong>Dunkel</strong><br><span class="muted small">Schwarzer Hintergrund mit angepassten Kontrasten für Text, Tabellen, Formulare und Bedienelemente.</span></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="feed-mode-options" style="margin-bottom:0.75rem;">
+      <strong>Benutzer-Feed</strong>
+      <label class="feed-mode-option">
+        <input type="radio" name="feed_exposure_mode" value="master"
+               {% if config.feed_exposure_mode == "master" %}checked{% endif %}>
+        <span><strong>1 · Ein Sammelfeed</strong><br><span class="muted small">Ein Feed mit den neuesten Episoden aller aktiven Podcasts.</span></span>
+      </label>
+      <label class="feed-mode-option">
+        <input type="radio" name="feed_exposure_mode" value="individual"
+               {% if config.feed_exposure_mode == "individual" %}checked{% endif %}>
+        <span><strong>2 · Ein Feed je Podcast</strong><br><span class="muted small">Jeder Podcast wird separat abonniert; die Einzel-URLs stehen auf der Startseite.</span></span>
+      </label>
+      <label class="feed-mode-option">
+        <input type="radio" name="feed_exposure_mode" value="master_preferred"
+               {% if config.feed_exposure_mode == "master_preferred" %}checked{% endif %}>
+        <span><strong>3 · Sammelfeed, bevorzugte zuerst</strong><br><span class="muted small">Wie Modus 1, aber als bevorzugt markierte Podcasts stehen im Sammelfeed zuerst.</span></span>
+      </label>
+    </div>
+    <p class="muted small">
+      Die Umschaltung ändert, welcher Feed auf der Startseite als Haupt-Variante angeboten wird.
+      Bereits bekannte Feed-URLs bleiben erreichbar, damit bestehende Abonnements nicht unerwartet ausfallen.
+      Im Modus 3 kannst du die bevorzugten Podcasts direkt auf der Startseite markieren.
+    </p>
+
     <div class="flex" style="margin-bottom:0.25rem;">
       <label class="flex">
         <input type="checkbox" name="llm_ad_detection_enabled" value="true"

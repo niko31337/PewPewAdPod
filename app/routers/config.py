@@ -60,6 +60,8 @@ def update_config(
     min_duplicate_seconds: str = Form(""),
     llm_ad_detection_enabled: bool = Form(False),
     master_feed_episodes_per_podcast: str = Form("1"),
+    feed_exposure_mode: str = Form("master"),
+    ui_theme: str = Form("light"),
     session: Session = Depends(get_session),
 ):
     config = cache_manager.get_or_create_config(session)
@@ -68,6 +70,12 @@ def update_config(
     config.min_duplicate_seconds = _parse_optional_float(min_duplicate_seconds)
     config.llm_ad_detection_enabled = llm_ad_detection_enabled
     config.master_feed_episodes_per_podcast = _parse_positive_int(master_feed_episodes_per_podcast, default=1)
+    if feed_exposure_mode not in {"master", "individual", "master_preferred"}:
+        feed_exposure_mode = "master"
+    config.feed_exposure_mode = feed_exposure_mode
+    if ui_theme not in {"light", "dark"}:
+        ui_theme = "light"
+    config.ui_theme = ui_theme
     config.updated_at = datetime.now(timezone.utc)
     session.add(config)
     session.commit()

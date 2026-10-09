@@ -1,0 +1,94 @@
+<div class="card playlist-card">
+  <div class="playlist-header">
+    <div>
+      <h3 style="margin-top:0;">Wiedergabeliste</h3>
+      {% if playlist_mode == "master_preferred" %}
+        <p class="muted">Die nächsten Episoden in Sammelfeed-Reihenfolge, bevorzugte Podcasts zuerst.</p>
+      {% elif playlist_mode == "individual" %}
+        <p class="muted">Übersicht der nächsten veröffentlichten Episoden der ausgewählten Podcasts.</p>
+      {% else %}
+        <p class="muted">Die nächsten Episoden in der aktuellen Sammelfeed-Reihenfolge.</p>
+      {% endif %}
+    </div>
+    <div class="playlist-view-switch" role="group" aria-label="Ansicht">
+      <button type="button" class="secondary playlist-view-btn" data-view="table">Tabelle</button>
+      <button type="button" class="secondary playlist-view-btn" data-view="list">Liste</button>
+    </div>
+  </div>
+
+  {% if playlist_rows %}
+  <p class="muted small playlist-summary" id="playlist-summary">
+    {{ playlist_rows|length }} Episode(n) · {{ playlist_per_feed }} pro Feed maximal
+    <span id="playlist-feed-count">· alle Feeds</span>
+  </p>
+
+  <details class="playlist-filters">
+    <summary>Feeds auswählen</summary>
+    <div class="playlist-filter-body">
+      <div class="playlist-filter-actions">
+        <button type="button" class="secondary" id="playlist-select-all">Alle</button>
+        <button type="button" class="secondary" id="playlist-select-none">Keine</button>
+      </div>
+      <div class="playlist-feed-options">
+        {% for feed in playlist_feeds %}
+        <label class="playlist-feed-option">
+          <input type="checkbox" class="playlist-feed-select" value="{{ feed.id }}" checked>
+          <span>{{ feed.title }}</span>
+        </label>
+        {% else %}
+        <span class="muted">Keine aktiven Feeds.</span>
+        {% endfor %}
+      </div>
+    </div>
+  </details>
+
+  <div class="playlist-table-wrap" data-playlist-view="table">
+    <table class="playlist-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Podcast</th>
+          <th>Episodentitel</th>
+          <th>Feed</th>
+          <th>Spielzeit</th>
+          <th>Δ zu Original</th>
+          <th>Erscheinungsdatum</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in playlist_rows %}
+        <tr class="playlist-row" data-feed-id="{{ row.feed.id }}">
+          <td class="playlist-position">{{ loop.index }}</td>
+          <td><a href="/feeds/{{ row.feed.id }}">{{ row.feed_name }}</a></td>
+          <td class="playlist-episode-title">{{ row.episode.title }}</td>
+          <td><a href="{{ row.feed_url }}" target="_blank">Feed {{ row.feed.id }}</a></td>
+          <td title="Original: {{ row.original_duration }}">{{ row.play_duration }}</td>
+          <td>{{ row.delta_duration }}</td>
+          <td class="muted">{{ row.pubdate_display }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="playlist-list-wrap" data-playlist-view="list" hidden>
+    {% for row in playlist_rows %}
+    <article class="playlist-list-item playlist-row" data-feed-id="{{ row.feed.id }}">
+      <div class="playlist-list-position">{{ loop.index }}</div>
+      <div class="playlist-list-main">
+        <div class="playlist-list-podcast"><a href="/feeds/{{ row.feed.id }}">{{ row.feed_name }}</a></div>
+        <div class="playlist-list-title">{{ row.episode.title }}</div>
+        <div class="playlist-list-meta">
+          <span><a href="{{ row.feed_url }}" target="_blank">Feed {{ row.feed.id }}</a></span>
+          <span>Spielzeit {{ row.play_duration }}</span>
+          <span>Δ {{ row.delta_duration }}</span>
+          <span>{{ row.pubdate_display }}</span>
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+    <div class="playlist-empty muted">Noch keine veröffentlichten Episoden mit verfügbarer Audiodatei.</div>
+  {% endif %}
+</div>

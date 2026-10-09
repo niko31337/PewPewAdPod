@@ -68,6 +68,7 @@ class Feed(SQLModel, table=True):
     cover_image_local_path: Optional[str] = None
     auto_cut: bool = False
     confidence_threshold: Optional[float] = None
+    preferred: bool = False
     active: bool = True
     last_polled_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
@@ -153,4 +154,6 @@ class AppConfig(SQLModel, table=True):
     min_duplicate_seconds: Optional[float] = None  # None = ad_keywords.yaml-Default verwenden
     llm_ad_detection_enabled: bool = False  # ressourcenintensiv - Opt-in
     master_feed_episodes_per_podcast: int = 1  # wie viele neueste Episoden je Podcast im Sammelfeed erscheinen
+    feed_exposure_mode: str = "master"  # master | individual | master_preferred
+    ui_theme: str = "light"  # light | dark
     updated_at: datetime = Field(default_factory=utcnow)
