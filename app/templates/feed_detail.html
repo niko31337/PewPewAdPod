@@ -93,6 +93,8 @@
           </div>
         {% elif ep.status.startswith("failed_") or ep.status == "error_permanent" %}
           <form method="post" action="/episodes/{{ ep.id }}/retry"><button class="secondary">Retry</button></form>
+        {% elif ep.status == "skipped" and ep.heard_elsewhere %}
+          <span class="muted">Anderswo gehört · lokale Dateien gelöscht</span>
         {% elif ep.status == "skipped" %}
           <span class="muted">Übersprungen</span>
           <form method="post" action="/episodes/{{ ep.id }}/retry" style="margin-top:0.4rem;">

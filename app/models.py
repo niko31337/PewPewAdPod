@@ -99,6 +99,9 @@ class Episode(SQLModel, table=True):
     status: str = EpisodeStatus.NEW
     error_message: Optional[str] = None
     retry_count: int = 0
+    # Permanently excluded after the user marks the episode as already heard elsewhere.
+    # Keep the row/GUID as a tombstone so feed polling does not queue it again.
+    heard_elsewhere: bool = False
 
     # Set when the podcaster replaces this episode's audio file after the fact (e.g. to
     # fix an error in the original). Populated by feed_ingest, processed by

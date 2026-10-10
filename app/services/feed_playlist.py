@@ -25,6 +25,7 @@ def select_playlist_entries(
             select(Episode)
             .where(Episode.feed_id == feed.id)
             .where(Episode.status == EpisodeStatus.PUBLISHED)
+            .where(Episode.heard_elsewhere == False)  # noqa: E712
             .order_by(Episode.pubdate.desc())
         ).all()
         chosen = [episode for episode in candidates if episode.processed_audio_path][:limit]

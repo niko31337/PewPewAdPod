@@ -70,7 +70,7 @@ def delete_episode_audio_route(episode_id: int, session: Session = Depends(get_s
 @router.post("/episodes/{episode_id}/retry")
 def retry_episode(episode_id: int, session: Session = Depends(get_session)):
     episode = session.get(Episode, episode_id)
-    if episode:
+    if episode and not episode.heard_elsewhere:
         episode.status = EpisodeStatus.NEW
         episode.retry_count = 0
         episode.error_message = None
@@ -83,7 +83,7 @@ def retry_episode(episode_id: int, session: Session = Depends(get_session)):
 @router.post("/episodes/{episode_id}/reprocess")
 def reprocess_episode_route(episode_id: int, session: Session = Depends(get_session)):
     episode = session.get(Episode, episode_id)
-    if episode:
+    if episode and not episode.heard_elsewhere:
         episode.status = EpisodeStatus.REANALYZE
         episode.error_message = None
         session.add(episode)

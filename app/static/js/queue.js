@@ -60,6 +60,23 @@ document.addEventListener("DOMContentLoaded", () => {
   const playlist = document.querySelector('.playlist-card');
   if (!playlist) return;
 
+  playlist.querySelectorAll('.playlist-heard-checkbox').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      if (!checkbox.checked) return;
+      const approved = window.confirm(
+        'Diese Episode als bereits anderswo gehört markieren? Sie wird aus deinem Feed entfernt. ' +
+        'Lokale Audio-, Korrektur-, Transkript- und Episoden-Cover-Dateien werden gelöscht. ' +
+        'Die Episode wird dauerhaft von einer erneuten Verarbeitung ausgeschlossen.'
+      );
+      if (!approved) {
+        checkbox.checked = false;
+        return;
+      }
+      checkbox.disabled = true;
+      checkbox.form.submit();
+    });
+  });
+
   const filterBoxes = Array.from(playlist.querySelectorAll('.playlist-feed-select'));
   const rows = Array.from(playlist.querySelectorAll('.playlist-row'));
   const tableWrap = playlist.querySelector('[data-playlist-view="table"]');

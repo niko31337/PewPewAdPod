@@ -250,6 +250,9 @@ def process_episode(episode_id: int) -> None:
             if episode is None:
                 log.warning("process_episode: episode %s not found", episode_id)
                 return
+            if episode.heard_elsewhere:
+                log.info("Not processing episode %s: marked as heard elsewhere", episode_id)
+                return
             feed = session.get(Feed, episode.feed_id)
 
             try:
@@ -295,6 +298,9 @@ def reprocess_episode(episode_id: int) -> None:
         episode = session.get(Episode, episode_id)
         if episode is None:
             log.warning("reprocess_episode: episode %s not found", episode_id)
+            return
+        if episode.heard_elsewhere:
+            log.info("Not reprocessing episode %s: marked as heard elsewhere", episode_id)
             return
         feed = session.get(Feed, episode.feed_id)
 
@@ -351,7 +357,11 @@ def recover_interrupted_episodes(session: Session) -> int:
     crash again forever - never reaching _mark_failed(), which is the only other place
     retry_count normally advances - silently wedging the whole queue behind it since
     the single-worker scheduler always processes the oldest queued episode first."""
-    stuck = session.exec(select(Episode).where(Episode.status.in_(_STUCK_STATUSES))).all()
+    stuck = session.exec(
+        select(Episode)
+        .where(Episode.status.in_(_STUCK_STATUSES))
+        .where(Episode.heard_elsewhere == False)  # noqa: E712
+    ).all()
     for episode in stuck:
         interrupted_status = episode.status
         episode.retry_count += 1
@@ -425,6 +435,9 @@ def process_episode_correction(episode_id: int) -> None:
             episode = session.get(Episode, episode_id)
             if episode is None or not episode.correction_audio_url:
                 log.warning("process_episode_correction: episode %s has no pending correction", episode_id)
+                return
+            if episode.heard_elsewhere:
+                log.info("Not processing correction for episode %s: marked as heard elsewhere", episode_id)
                 return
             feed = session.get(Feed, episode.feed_id)
 
