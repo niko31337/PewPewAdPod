@@ -34,6 +34,7 @@ def process_queue_job() -> None:
             episode = session.exec(
                 select(Episode)
                 .where(Episode.status.in_([EpisodeStatus.NEW, EpisodeStatus.REANALYZE]))
+                .where(Episode.heard_elsewhere == False)  # noqa: E712
                 .order_by(Episode.created_at)
             ).first()
             episode_id = episode.id if episode else None
@@ -53,6 +54,7 @@ def retry_failed_job() -> None:
             failed = session.exec(
                 select(Episode)
                 .where(Episode.status.in_(_FAILED_STATUSES))
+                .where(Episode.heard_elsewhere == False)  # noqa: E712
                 .where(Episode.retry_count < settings.max_retries)
             ).all()
             for episode in failed:
@@ -70,6 +72,7 @@ def correction_queue_job() -> None:
             episode = session.exec(
                 select(Episode)
                 .where(Episode.correction_status == CorrectionStatus.DETECTED)
+                .where(Episode.heard_elsewhere == False)  # noqa: E712
                 .order_by(Episode.correction_detected_at)
             ).first()
             episode_id = episode.id if episode else None

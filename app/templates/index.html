@@ -2,6 +2,17 @@
 {% block content %}
 <h1>Feeds</h1>
 
+{% if requeued is not none %}
+<div class="card" role="status">
+  {% if requeued > 0 %}
+    <p><strong>{{ requeued }} Review-Episode(n) zur erneuten Verarbeitung eingereiht.</strong></p>
+    <p class="muted small">Die normale Warteschlange analysiert sie erneut und veröffentlicht sie bei erfolgreichem Auto-Cut.</p>
+  {% else %}
+    <p>Keine passenden Review-Episoden gefunden.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if opml_imported is not none %}
 <div class="card">
   {% if opml_imported > 0 %}
@@ -15,12 +26,25 @@
 <div class="card">
   <div class="flex" style="justify-content:space-between;">
     <div>
-      <h3>Nikos pewpewadpod Feed</h3>
-      <p class="muted">Sammelfeed mit der jeweils neuesten, werbefreien Episode aus allen hinterlegten
-        Podcasts. Episoden-Artwork trägt zusätzlich das PewPewAdPod-Logo als Wasserzeichen.</p>
-      <div class="muted">Feed-URL: <a href="/feed/master.xml">/feed/master.xml</a></div>
+      {% if feed_exposure_mode == "individual" %}
+        <h3>Einzelne Podcast-Feeds</h3>
+        <p class="muted">Modus 2: Jeder hinterlegte Podcast hat einen eigenen Feed. Die einzelnen Feed-URLs findest du bei den jeweiligen Podcasts weiter unten.</p>
+      {% elif feed_exposure_mode == "master_preferred" %}
+        <h3>Nikos pewpewadpod Feed</h3>
+        <p class="muted">Modus 3: Sammelfeed mit den neuesten, werbefreien Episoden aller aktiven Podcasts. Als bevorzugt markierte Podcasts stehen zuerst.</p>
+        <div class="muted">Feed-URL: <a href="/feed/master.xml">/feed/master.xml</a></div>
+      {% else %}
+        <h3>Nikos pewpewadpod Feed</h3>
+        <p class="muted">Modus 1: Sammelfeed mit der jeweils neuesten, werbefreien Episode aus allen hinterlegten Podcasts.</p>
+        <div class="muted">Feed-URL: <a href="/feed/master.xml">/feed/master.xml</a></div>
+      {% endif %}
+      {% if feed_exposure_mode != "individual" %}
+        <p class="muted small">Episoden-Artwork trägt zusätzlich das PewPewAdPod-Logo als Wasserzeichen.</p>
+      {% endif %}
     </div>
+    {% if feed_exposure_mode != "individual" %}
     <img src="/media/covers/master/cover.jpg" alt="" style="width:64px;height:64px;border-radius:6px;object-fit:cover;">
+    {% endif %}
   </div>
 </div>
 
@@ -40,41 +64,127 @@
   </form>
 </div>
 
+{% if feeds %}
+<form id="bulk-feed-form" method="post" action="/feeds/bulk-action">
+  <div class="bulk-feed-toolbar">
+    <div class="bulk-feed-toolbar-top">
+      <div>
+        <strong>Mehrfachauswahl</strong>
+        <span id="bulk-feed-count" class="muted">0 ausgewählt</span>
+      </div>
+      <div class="flex">
+        <button type="button" class="secondary" id="select-all-feeds">Alle auswählen</button>
+        <button type="button" class="secondary" id="select-none-feeds">Alle abwählen</button>
+      </div>
+    </div>
+    <div class="flex bulk-feed-actions">
+      <button type="submit" name="action" value="activate">Aktivieren</button>
+      <button type="submit" name="action" value="deactivate" class="secondary">Deaktivieren</button>
+      <button type="submit" name="action" value="enable_auto_cut">Auto-Cut an + Review nachholen</button>
+      <button type="submit" name="action" value="reprocess_review" class="secondary" onclick="return confirm('Review-Episoden der ausgewählten Auto-Cut-Feeds erneut einreihen?');">Review-Episoden nachholen</button>
+      <button type="submit" name="action" value="disable_auto_cut" class="secondary">Auto-Cut aus</button>
+      <button type="submit" name="action" value="toggle_auto_cut" class="secondary">Auto-Cut umschalten</button>
+      <button type="submit" name="action" value="set_preferred">Als bevorzugt markieren</button>
+      <button type="submit" name="action" value="clear_preferred" class="secondary">Bevorzugt entfernen</button>
+    </div>
+  </div>
+</form>
+{% endif %}
+
 {% for feed in feeds %}
-<div class="card">
-  <div class="flex" style="justify-content:space-between;">
-    <div>
-      <h3><a href="/feeds/{{ feed.id }}">{{ feed.title }}</a></h3>
-      <div class="muted">{{ feed.original_rss_url }}</div>
-      <div style="margin: 0.3rem 0;">
-        <span class="badge {{ 'published' if feed.active else '' }}">
-          {{ "Aktiv" if feed.active else "Inaktiv" }}
-        </span>
-        <span class="badge {{ 'published' if feed.auto_cut else 'pending_review' }}">
-          {{ "Auto-Cut" if feed.auto_cut else "Manuelle Review" }}
-        </span>
-        {% if feed.auto_cut %}
-          <span class="muted small">Schwelle {{ feed.confidence_threshold if feed.confidence_threshold is not none else default_threshold }}</span>
+<div class="card feed-card">
+  <div class="feed-card-main">
+    <div class="feed-select-wrap">
+      <input type="checkbox" class="feed-select" name="feed_ids" value="{{ feed.id }}" form="bulk-feed-form" aria-label="{{ feed.title }} auswählen">
+    </div>
+    <div style="flex:1;min-width:0;">
+      <div class="flex" style="justify-content:space-between;align-items:flex-start;">
+        <div>
+          <h3><a href="/feeds/{{ feed.id }}">{{ feed.title }}</a></h3>
+          <div class="muted">{{ feed.original_rss_url }}</div>
+          <div style="margin: 0.3rem 0;">
+            <span class="badge {{ 'published' if feed.active else '' }}">
+              {{ "Aktiv" if feed.active else "Inaktiv" }}
+            </span>
+            <span class="badge {{ 'published' if feed.auto_cut else 'pending_review' }}">
+              {{ "Auto-Cut" if feed.auto_cut else "Manuelle Review" }}
+            </span>
+            {% if feed.auto_cut %}
+              <span class="muted small">Schwelle {{ feed.confidence_threshold if feed.confidence_threshold is not none else default_threshold }}</span>
+            {% endif %}
+          </div>
+          <div class="muted">Eigener Feed: <a href="/feed/{{ feed.id }}.xml">/feed/{{ feed.id }}.xml</a></div>
+        </div>
+        {% if feed.cover_image_local_path %}
+        <img src="/media/covers/{{ feed.id }}/cover.jpg" alt="" style="width:64px;height:64px;border-radius:6px;object-fit:cover;">
         {% endif %}
       </div>
-      <div class="muted">Eigener Feed: <a href="/feed/{{ feed.id }}.xml">/feed/{{ feed.id }}.xml</a></div>
+      <form method="post" action="/feeds/{{ feed.id }}/toggle-preferred" class="preferred-feed-form">
+        <label class="preferred-feed-label">
+          <input type="checkbox" name="preferred" value="true" onchange="this.form.submit()" {% if feed.preferred %}checked{% endif %}>
+          Bevorzugter Feed
+        </label>
+        {% if feed_exposure_mode != "master_preferred" %}
+        <span class="muted small">(wirksam in Modus 3)</span>
+        {% endif %}
+      </form>
     </div>
-    {% if feed.cover_image_local_path %}
-    <img src="/media/covers/{{ feed.id }}/cover.jpg" alt="" style="width:64px;height:64px;border-radius:6px;object-fit:cover;">
-    {% endif %}
   </div>
-  <div class="flex" style="margin-top:0.5rem;">
+  <div class="flex feed-actions" style="margin-top:0.5rem;">
     <form method="post" action="/feeds/{{ feed.id }}/refresh"><button class="secondary">Jetzt aktualisieren</button></form>
     <form method="post" action="/feeds/{{ feed.id }}/toggle-active">
       <button class="secondary" title="Pausiert das Abrufen neuer Episoden und nimmt den Feed aus dem Sammelfeed heraus, bestehende Episoden/Abo bleiben erhalten">
         {{ "Deaktivieren" if feed.active else "Aktivieren" }}
       </button>
     </form>
-    <form method="post" action="/feeds/{{ feed.id }}/toggle-auto-cut"><button class="secondary">Auto-Cut umschalten</button></form>
+    <form method="post" action="/feeds/{{ feed.id }}/toggle-auto-cut" {% if not feed.auto_cut %}onsubmit="return confirm('Auto-Cut aktivieren und vorhandene Review-Episoden zur erneuten Verarbeitung einreihen?');"{% endif %}>
+      <button class="secondary">{{ "Auto-Cut deaktivieren" if feed.auto_cut else "Auto-Cut aktivieren + Review nachholen" }}</button>
+    </form>
+    {% if feed.auto_cut %}
+    <form method="post" action="/feeds/{{ feed.id }}/reprocess-review" onsubmit="return confirm('Alle vorhandenen Review-Episoden dieses Feeds erneut verarbeiten?');">
+      <button class="secondary">Review-Episoden nachholen</button>
+    </form>
+    {% endif %}
     <form method="post" action="/feeds/{{ feed.id }}/delete" onsubmit="return confirm('Feed wirklich löschen?');"><button class="danger">Löschen</button></form>
   </div>
 </div>
 {% else %}
 <p class="muted">Noch keine Feeds hinterlegt.</p>
 {% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const boxes = Array.from(document.querySelectorAll('.feed-select'));
+  const count = document.getElementById('bulk-feed-count');
+  const selectAll = document.getElementById('select-all-feeds');
+  const selectNone = document.getElementById('select-none-feeds');
+  if (!boxes.length || !count || !selectAll || !selectNone) return;
+
+  function updateCount() {
+    const n = boxes.filter(box => box.checked).length;
+    count.textContent = n + ' ausgewählt';
+  }
+
+  boxes.forEach(box => box.addEventListener('change', updateCount));
+  selectAll.addEventListener('click', () => {
+    boxes.forEach(box => { box.checked = true; });
+    updateCount();
+  });
+  selectNone.addEventListener('click', () => {
+    boxes.forEach(box => { box.checked = false; });
+    updateCount();
+  });
+
+  document.getElementById('bulk-feed-form').addEventListener('submit', function (event) {
+    if (!boxes.some(box => box.checked)) {
+      event.preventDefault();
+      alert('Bitte mindestens einen Feed auswählen.');
+    }
+  });
+
+  updateCount();
+})();
+</script>
 {% endblock %}

@@ -161,6 +161,11 @@ def poll_feed(session: Session, feed: Feed) -> int:
 
         existing = existing_episodes.get(guid)
         if existing is not None:
+            # Keep the skipped GUID as a tombstone. Even if the publisher replaces the
+            # enclosure later, an episode marked "heard elsewhere" must not be downloaded
+            # or queued again.
+            if existing.heard_elsewhere:
+                continue
             if audio_url and audio_url != existing.original_audio_url:
                 _handle_possible_correction(session, existing, audio_url)
             continue

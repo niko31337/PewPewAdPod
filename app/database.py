@@ -5,6 +5,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.pool import QueuePool
 from sqlmodel import Session, SQLModel, create_engine
 
 log = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ def _connect_with_retry(attempts: int = 8, delay_s: float = 0.25) -> sqlite3.Con
     raise last_exc
 
 
-engine = create_engine("sqlite://", creator=_connect_with_retry)
+engine = create_engine("sqlite://", creator=_connect_with_retry, poolclass=QueuePool, pool_pre_ping=True)
 
 
 @event.listens_for(Engine, "connect")
