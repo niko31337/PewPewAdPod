@@ -88,6 +88,25 @@ def test_unrelated_files_produce_no_high_support_candidates():
     assert all(c.support < 15 for c in candidates)
 
 
+def test_common_fingerprint_hash_is_memory_bounded(monkeypatch):
+    # A very common hash can otherwise create a Cartesian product with millions or
+    # billions of (frame_a, frame_b) pairs. The duplicate detector must skip such
+    # non-discriminative hashes instead of materializing the pair list.
+    monkeypatch.setattr(fingerprint_module, "_spectrogram_peaks", lambda *args, **kwargs: [])
+    common_frames = list(range(60_000))
+    monkeypatch.setattr(
+        fingerprint_module,
+        "_build_fingerprints",
+        lambda *args, **kwargs: {123: common_frames},
+    )
+
+    a = np.zeros(10, dtype=np.float32)
+    b = np.zeros(10, dtype=np.float32)
+    candidates = find_repeated_segments_in_samples(a, b)
+
+    assert candidates == []
+
+
 def test_genuine_shared_segment_passes_waveform_verification():
     shared = _tone_burst(1.5)
     episode_a = _white_noise(8.0, seed=1)

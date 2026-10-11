@@ -1,3 +1,4 @@
+import heapq
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ class MatchCandidate:
 
 
 _SPECTROGRAM_CHUNK_FRAMES = 5000
+_FINGERPRINT_PAIRINGS_PER_HASH = 50_000
+_CANDIDATE_POOL_MULTIPLIER = 20
 
 
 def _spectrogram_peaks(
@@ -106,8 +109,12 @@ def find_repeated_segments(
     """Find audio segments that occur in both files (independent of where in each file
     they appear) - a strong signal for jingles/bumpers/intros that are reused across
     episodes of the same show, as opposed to spoken content which won't repeat."""
+    from app.services.memory_diagnostics import log_memory
+
     samples_a = _load_mono_samples(path_a, target_sample_rate)
+    log_memory(log, f"fingerprint after load A n={len(samples_a)} bytes={samples_a.nbytes}")
     samples_b = _load_mono_samples(path_b, target_sample_rate)
+    log_memory(log, f"fingerprint after load B n={len(samples_b)} bytes={samples_b.nbytes}")
     return find_repeated_segments_in_samples(
         samples_a,
         samples_b,
@@ -139,39 +146,108 @@ def find_repeated_segments_in_samples(
     min_verify_correlation: float = 0.6,
 ) -> list[MatchCandidate]:
     """Pure-numpy core of find_repeated_segments, decoupled from audio file I/O."""
+    from app.services.memory_diagnostics import log_memory
+
     peaks_a = _spectrogram_peaks(samples_a, frame_size, hop_size, num_peaks)
+    log_memory(log, f"fingerprint after peaks A frames={len(peaks_a)}")
     peaks_b = _spectrogram_peaks(samples_b, frame_size, hop_size, num_peaks)
+    log_memory(log, f"fingerprint after peaks B frames={len(peaks_b)}")
 
     fp_a = _build_fingerprints(peaks_a, fan_out, target_frames)
+    log_memory(log, f"fingerprint after build fp_a keys={len(fp_a)} values={sum(len(v) for v in fp_a.values())}")
     fp_b = _build_fingerprints(peaks_b, fan_out, target_frames)
-
-    delta_hits: dict[int, list[int]] = defaultdict(list)
-    for h in fp_a.keys() & fp_b.keys():
-        frames_a = fp_a[h]
-        frames_b = fp_b[h]
-        for fa in frames_a:
-            for fb in frames_b:
-                delta_hits[fb - fa].append(fa)
+    log_memory(log, f"fingerprint after build fp_b keys={len(fp_b)} values={sum(len(v) for v in fp_b.values())}")
 
     hop_s = hop_size / target_sample_rate
     frame_span_s = frame_size / target_sample_rate
 
-    candidates: list[MatchCandidate] = []
-    for delta, frames_a_hits in delta_hits.items():
-        if len(frames_a_hits) < min_support:
-            continue
-        frames_a_sorted = sorted(frames_a_hits)
-        cluster = [frames_a_sorted[0]]
-        for fa in frames_a_sorted[1:]:
-            if fa - cluster[-1] <= merge_gap_frames:
-                cluster.append(fa)
-                continue
-            if len(cluster) >= min_support:
-                candidates.append(_cluster_to_candidate(cluster, delta, hop_s, frame_span_s))
-            cluster = [fa]
-        if len(cluster) >= min_support:
-            candidates.append(_cluster_to_candidate(cluster, delta, hop_s, frame_span_s))
+    # The old implementation materialized every (fa, fb) pair in delta_hits.
+    # For common fingerprint hashes this can explode combinatorially; Episode 688
+    # produced 1.2 billion stored values and exhausted the container. We instead
+    # process A-frames in ascending order, keep only the current cluster per delta,
+    # collapse duplicate observations for the same frame, and retain only a small
+    # top-N candidate pool. Extremely common hashes are skipped because they are
+    # not discriminative enough to be useful evidence of reused audio.
+    max_pairings_per_hash = _FINGERPRINT_PAIRINGS_PER_HASH
+    candidate_pool_limit = max(100, max_candidates * _CANDIDATE_POOL_MULTIPLIER)
 
+    max_frame_a = max((frame for frames in fp_a.values() for frame in frames), default=-1)
+    frame_hashes_a: list[list[int]] = [[] for _ in range(max_frame_a + 1)]
+    for h, frames_a in fp_a.items():
+        for fa in frames_a:
+            frame_hashes_a[fa].append(h)
+
+    # delta -> [last_fa, cluster_count, cluster_start]
+    delta_state: dict[int, list[int]] = {}
+    candidate_heap: list[tuple[int, int, MatchCandidate]] = []
+    heap_counter = 0
+    skipped_common_hashes = 0
+
+    def add_candidate(delta: int, cluster_start: int, cluster_end: int, support: int) -> None:
+        nonlocal heap_counter
+        if support < min_support:
+            return
+        candidate = MatchCandidate(
+            start_a_s=max(0.0, cluster_start * hop_s),
+            end_a_s=cluster_end * hop_s + frame_span_s,
+            start_b_s=max(0.0, cluster_start * hop_s + delta * hop_s),
+            end_b_s=cluster_end * hop_s + frame_span_s + delta * hop_s,
+            support=support,
+        )
+        heap_counter += 1
+        item = (support, heap_counter, candidate)
+        if len(candidate_heap) < candidate_pool_limit:
+            heapq.heappush(candidate_heap, item)
+        elif support > candidate_heap[0][0]:
+            heapq.heapreplace(candidate_heap, item)
+
+    for fa, hashes in enumerate(frame_hashes_a):
+        if not hashes:
+            continue
+        hash_counts_at_fa: dict[int, int] = {}
+        for h in hashes:
+            hash_counts_at_fa[h] = hash_counts_at_fa.get(h, 0) + 1
+
+        for h, occurrences_at_fa in hash_counts_at_fa.items():
+            frames_b = fp_b.get(h)
+            if not frames_b:
+                continue
+            if len(frames_b) * occurrences_at_fa > max_pairings_per_hash:
+                skipped_common_hashes += 1
+                continue
+            for fb in frames_b:
+                delta = fb - fa
+                state = delta_state.get(delta)
+                if state is None:
+                    delta_state[delta] = [fa, 1, fa]
+                    continue
+                last_fa, count, cluster_start = state
+                if last_fa == fa:
+                    continue
+                if fa - last_fa <= merge_gap_frames:
+                    state[0] = fa
+                    state[1] = count + 1
+                else:
+                    add_candidate(delta, cluster_start, last_fa, count)
+                    delta_state[delta] = [fa, 1, fa]
+
+    for delta, state in delta_state.items():
+        last_fa, count, cluster_start = state
+        add_candidate(delta, cluster_start, last_fa, count)
+
+    if skipped_common_hashes:
+        log.debug(
+            "Skipped %d overly common fingerprint-hash occurrences during duplicate detection",
+            skipped_common_hashes,
+        )
+
+    log_memory(
+        log,
+        f"fingerprint after delta_hits candidates={len(candidate_heap)} "
+        f"states={len(delta_state)} skipped_common={skipped_common_hashes}",
+    )
+
+    candidates = [item[2] for item in candidate_heap]
     candidates.sort(key=lambda c: -c.support)
     deduped: list[MatchCandidate] = []
     for c in candidates:

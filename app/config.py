@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # Whisper
     whisper_model_size: str = "small"
     whisper_compute_type: str = "int8"
+    # Transcribe long episodes in bounded chunks. faster-whisper decodes a path to the
+    # complete audio waveform before feature extraction; multi-hour files can otherwise
+    # exhaust RAM during the STFT. 15 minutes keeps feature-extraction working sets small
+    # while preserving enough context within each chunk.
+    whisper_chunk_seconds: int = 900
 
     # Local LLM ad classification (opt-in per AppConfig.llm_ad_detection_enabled - only
     # downloaded/loaded into memory the first time an episode is analyzed with it on)

@@ -52,6 +52,7 @@ class _FlakyExecuteConnection:
     def execute(self, *args, **kwargs):
         self._calls["count"] += 1
         if self._calls["count"] < self._fail_until:
+            self._calls["failures"] = self._calls.get("failures", 0) + 1
             raise sqlite3.OperationalError("unable to open database file")
         return self._real.execute(*args, **kwargs)
 
@@ -80,7 +81,10 @@ def test_connect_retries_then_succeeds_after_transient_lock_on_first_statement(t
 
     conn = _connect_with_retry(attempts=5, delay_s=0)
 
-    assert calls["count"] == 3
+    # Count the injected failures, not every execute(): _connect_with_retry runs more
+    # than one PRAGMA per successful attempt (journal_mode, busy_timeout), so the total
+    # number of execute() calls changes whenever a pragma is added or removed.
+    assert calls["failures"] == 2
     conn.execute("SELECT 1")
     conn.close()
 

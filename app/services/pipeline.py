@@ -1,8 +1,11 @@
 import json
+import ctypes
+import gc
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import inspect as sa_inspect
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -13,6 +16,39 @@ from app.services import audio_editor, cache_manager, downloader, jingle_detecto
 from app.services.ad_detector import Candidate, detect_ad_segments
 
 log = logging.getLogger(__name__)
+
+
+def _rss_mb() -> float | None:
+    """Return this process' resident set size on Linux, or None elsewhere."""
+    try:
+        with open("/proc/self/status", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024.0
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _release_process_memory() -> None:
+    """Collect Python garbage and ask glibc to return freed native heaps to the OS.
+
+    The media-analysis pipeline creates large NumPy/pydub/native buffers. On Linux,
+    glibc may keep freed large allocations in its arenas, so RSS can remain high even
+    though the Python objects are gone. This is not a substitute for fixing a true
+    native leak, but it prevents allocator retention from accumulating across episodes.
+    """
+    before = _rss_mb()
+    gc.collect()
+    try:
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+    except OSError:
+        pass
+    after = _rss_mb()
+    if before is not None and after is not None:
+        log.info("Memory cleanup after episode: RSS %.1f MB -> %.1f MB", before, after)
+
 
 
 def _now():
@@ -167,55 +203,86 @@ def _analyze_and_finalize(
 
 
 def _mark_failed(session: Session, episode: Episode, exc: Exception) -> None:
-    log.exception("Pipeline failed for episode %s at status=%s", episode.id, episode.status)
+    # A failed flush/commit leaves SQLAlchemy's Session in PendingRollbackError.
+    # Never read episode.status from that expired ORM object before rollback: doing so
+    # can trigger another SELECT and mask the original exception with a second error.
+    episode_id = sa_inspect(episode).identity[0]
+    try:
+        session.rollback()
+        failed_episode = session.get(Episode, episode_id)
+    except Exception:
+        log.exception("Could not reload episode %s after pipeline failure", episode_id)
+        raise
+
+    current_status = failed_episode.status if failed_episode is not None else None
+    log.exception("Pipeline failed for episode %s at status=%s", episode_id, current_status)
+
     failed_status = {
         EpisodeStatus.DOWNLOADING: EpisodeStatus.FAILED_DOWNLOAD,
         EpisodeStatus.TRANSCRIBING: EpisodeStatus.FAILED_TRANSCRIBE,
         EpisodeStatus.ANALYZING: EpisodeStatus.FAILED_ANALYZE,
         EpisodeStatus.CUTTING: EpisodeStatus.FAILED_CUT,
-    }.get(episode.status, EpisodeStatus.FAILED_DOWNLOAD)
+    }.get(current_status, EpisodeStatus.FAILED_DOWNLOAD)
 
-    episode.status = failed_status
-    episode.error_message = str(exc)
-    episode.retry_count += 1
-    if episode.retry_count >= settings.max_retries:
-        episode.status = EpisodeStatus.ERROR_PERMANENT
-    episode.updated_at = _now()
-    session.add(episode)
-    session.commit()
+    if failed_episode is None:
+        log.error("Episode %s disappeared while handling pipeline failure", episode_id)
+        return
+
+    failed_episode.status = failed_status
+    failed_episode.error_message = str(exc)
+    failed_episode.retry_count += 1
+    if failed_episode.retry_count >= settings.max_retries:
+        failed_episode.status = EpisodeStatus.ERROR_PERMANENT
+    failed_episode.updated_at = _now()
+    session.add(failed_episode)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        log.exception("Could not persist failure state for episode %s", episode_id)
+        raise
 
 
 def process_episode(episode_id: int) -> None:
-    with session_scope() as session:
-        episode = session.get(Episode, episode_id)
-        if episode is None:
-            log.warning("process_episode: episode %s not found", episode_id)
-            return
-        feed = session.get(Feed, episode.feed_id)
+    try:
+        with session_scope() as session:
+            episode = session.get(Episode, episode_id)
+            if episode is None:
+                log.warning("process_episode: episode %s not found", episode_id)
+                return
+            feed = session.get(Feed, episode.feed_id)
 
-        try:
-            _set_status(session, episode, EpisodeStatus.DOWNLOADING)
-            path = downloader.download_file(episode.original_audio_url, _originals_path(episode.id))
-            episode.original_audio_path = str(path)
-            episode.duration_seconds = audio_editor.get_duration_seconds(path)
-            session.add(episode)
-            session.commit()
+            try:
+                from app.services.memory_diagnostics import log_memory
+                log_memory(log, f"episode={episode.id} pipeline START")
+                _set_status(session, episode, EpisodeStatus.DOWNLOADING)
+                path = downloader.download_file(episode.original_audio_url, _originals_path(episode.id))
+                episode.original_audio_path = str(path)
+                episode.duration_seconds = audio_editor.get_duration_seconds(path)
+                session.add(episode)
+                session.commit()
 
-            if episode.itunes_image_url:
-                img_dest = settings.covers_dir / str(feed.id) / "episodes" / f"{episode.id}.jpg"
-                if downloader.download_image(episode.itunes_image_url, img_dest):
-                    episode.local_image_path = str(img_dest)
-                    session.add(episode)
-                    session.commit()
+                if episode.itunes_image_url:
+                    img_dest = settings.covers_dir / str(feed.id) / "episodes" / f"{episode.id}.jpg"
+                    if downloader.download_image(episode.itunes_image_url, img_dest):
+                        episode.local_image_path = str(img_dest)
+                        session.add(episode)
+                        session.commit()
 
-            _set_status(session, episode, EpisodeStatus.TRANSCRIBING)
-            transcript = transcriber.transcribe_audio(path)
-            transcriber.save_transcript_json(episode.id, transcript)
+                _set_status(session, episode, EpisodeStatus.TRANSCRIBING)
+                log_memory(log, f"episode={episode.id} BEFORE transcribe")
+                transcript = transcriber.transcribe_audio(path)
+                log_memory(log, f"episode={episode.id} AFTER transcribe segments={len(transcript)}")
+                transcriber.save_transcript_json(episode.id, transcript)
+                log_memory(log, f"episode={episode.id} AFTER save transcript")
 
-            _analyze_and_finalize(session, episode, feed, path, transcript)
+                _analyze_and_finalize(session, episode, feed, path, transcript)
+                log_memory(log, f"episode={episode.id} AFTER analyze/finalize")
 
-        except Exception as exc:
-            _mark_failed(session, episode, exc)
+            except Exception as exc:
+                _mark_failed(session, episode, exc)
+    finally:
+        _release_process_memory()
 
 
 def reprocess_episode(episode_id: int) -> None:
@@ -322,78 +389,100 @@ def recover_interrupted_episodes(session: Session) -> int:
 
 
 def _mark_correction_failed(session: Session, episode: Episode, exc: Exception) -> None:
-    log.exception("Correction processing failed for episode %s", episode.id)
-    episode.correction_status = CorrectionStatus.FAILED
-    episode.correction_error_message = str(exc)
-    episode.updated_at = _now()
-    session.add(episode)
-    session.commit()
+    # Same PendingRollbackError trap as the normal pipeline failure handler: do not
+    # access expired ORM attributes until the failed transaction has been rolled back.
+    episode_id = sa_inspect(episode).identity[0]
+    try:
+        session.rollback()
+        failed_episode = session.get(Episode, episode_id)
+    except Exception:
+        log.exception("Could not reload episode %s after correction failure", episode_id)
+        raise
+
+    log.exception("Correction processing failed for episode %s", episode_id)
+    if failed_episode is None:
+        log.error("Episode %s disappeared while handling correction failure", episode_id)
+        return
+
+    failed_episode.correction_status = CorrectionStatus.FAILED
+    failed_episode.correction_error_message = str(exc)
+    failed_episode.updated_at = _now()
+    session.add(failed_episode)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        log.exception("Could not persist correction failure state for episode %s", episode_id)
+        raise
 
 
 def process_episode_correction(episode_id: int) -> None:
     """Downloads and processes a replacement audio file the podcaster published for an
     already-processed episode. Entirely separate files/paths from the original - nothing
     under original_audio_path/processed_audio_path is read or written here."""
-    with session_scope() as session:
-        episode = session.get(Episode, episode_id)
-        if episode is None or not episode.correction_audio_url:
-            log.warning("process_episode_correction: episode %s has no pending correction", episode_id)
-            return
-        feed = session.get(Feed, episode.feed_id)
+    try:
+        with session_scope() as session:
+            episode = session.get(Episode, episode_id)
+            if episode is None or not episode.correction_audio_url:
+                log.warning("process_episode_correction: episode %s has no pending correction", episode_id)
+                return
+            feed = session.get(Feed, episode.feed_id)
 
-        try:
-            episode.correction_status = CorrectionStatus.DOWNLOADING
-            episode.updated_at = _now()
-            session.add(episode)
-            session.commit()
+            try:
+                episode.correction_status = CorrectionStatus.DOWNLOADING
+                episode.updated_at = _now()
+                session.add(episode)
+                session.commit()
 
-            path = downloader.download_file(episode.correction_audio_url, _correction_originals_path(episode.id))
-            episode.correction_original_path = str(path)
-            session.add(episode)
-            session.commit()
+                path = downloader.download_file(episode.correction_audio_url, _correction_originals_path(episode.id))
+                episode.correction_original_path = str(path)
+                session.add(episode)
+                session.commit()
 
-            episode.correction_status = CorrectionStatus.TRANSCRIBING
-            session.add(episode)
-            session.commit()
-            transcript = transcriber.transcribe_audio(path)
-            transcriber.save_transcript_json(f"{episode.id}_correction", transcript)
+                episode.correction_status = CorrectionStatus.TRANSCRIBING
+                session.add(episode)
+                session.commit()
+                transcript = transcriber.transcribe_audio(path)
+                transcriber.save_transcript_json(f"{episode.id}_correction", transcript)
 
-            episode.correction_status = CorrectionStatus.ANALYZING
-            session.add(episode)
-            session.commit()
-            previous_audio_path = _find_previous_episode_audio(session, feed.id, episode.id)
-            candidates = detect_ad_segments(
-                path,
-                transcript,
-                settings.ad_keywords_path,
-                session=session,
-                feed_id=feed.id,
-                jingles_dir=settings.ad_jingles_dir,
-                previous_episode_audio_path=previous_audio_path,
-            )
-            persist_ad_segments(session, episode, candidates, is_correction=True)
-            record_jingle_matches(session, feed.id, candidates)
+                episode.correction_status = CorrectionStatus.ANALYZING
+                session.add(episode)
+                session.commit()
+                previous_audio_path = _find_previous_episode_audio(session, feed.id, episode.id)
+                candidates = detect_ad_segments(
+                    path,
+                    transcript,
+                    settings.ad_keywords_path,
+                    session=session,
+                    feed_id=feed.id,
+                    jingles_dir=settings.ad_jingles_dir,
+                    previous_episode_audio_path=previous_audio_path,
+                )
+                persist_ad_segments(session, episode, candidates, is_correction=True)
+                record_jingle_matches(session, feed.id, candidates)
 
-            threshold = feed.confidence_threshold or settings.default_auto_cut_threshold
-            accepted_ranges = [(c.start_ms, c.end_ms) for c in candidates if c.confidence >= threshold]
+                threshold = feed.confidence_threshold or settings.default_auto_cut_threshold
+                accepted_ranges = [(c.start_ms, c.end_ms) for c in candidates if c.confidence >= threshold]
 
-            episode.correction_status = CorrectionStatus.CUTTING
-            session.add(episode)
-            session.commit()
-            dest = _correction_processed_path(episode.id)
-            audio_editor.cut_and_export(path, dest, accepted_ranges, crossfade_ms=settings.crossfade_ms)
-            episode.correction_processed_path = str(dest)
-            episode.correction_status = CorrectionStatus.READY
-            episode.updated_at = _now()
-            session.add(episode)
-            session.commit()
-            log.info(
-                "Correction ready for episode %s (%d segment(s) removed) - awaiting review",
-                episode.id,
-                len(accepted_ranges),
-            )
-        except Exception as exc:
-            _mark_correction_failed(session, episode, exc)
+                episode.correction_status = CorrectionStatus.CUTTING
+                session.add(episode)
+                session.commit()
+                dest = _correction_processed_path(episode.id)
+                audio_editor.cut_and_export(path, dest, accepted_ranges, crossfade_ms=settings.crossfade_ms)
+                episode.correction_processed_path = str(dest)
+                episode.correction_status = CorrectionStatus.READY
+                episode.updated_at = _now()
+                session.add(episode)
+                session.commit()
+                log.info(
+                    "Correction ready for episode %s (%d segment(s) removed) - awaiting review",
+                    episode.id,
+                    len(accepted_ranges),
+                )
+            except Exception as exc:
+                _mark_correction_failed(session, episode, exc)
+    finally:
+        _release_process_memory()
 
 
 def apply_correction(session: Session, episode: Episode) -> None:

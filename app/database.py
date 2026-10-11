@@ -38,6 +38,7 @@ def _connect_with_retry(attempts: int = 8, delay_s: float = 0.25) -> sqlite3.Con
         try:
             conn = sqlite3.connect(str(settings.db_path), check_same_thread=False)
             conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
         except sqlite3.OperationalError as exc:
             if conn is not None:
                 conn.close()
@@ -56,6 +57,7 @@ engine = create_engine("sqlite://", creator=_connect_with_retry)
 def _set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
 
