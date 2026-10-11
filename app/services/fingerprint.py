@@ -215,21 +215,25 @@ def find_repeated_segments_in_samples(
             if len(frames_b) * occurrences_at_fa > max_pairings_per_hash:
                 skipped_common_hashes += 1
                 continue
+            # Support deliberately counts every matching hash pairing (weighted by how often
+            # the hash occurs at this frame), NOT the number of distinct frames: min_support
+            # and support_normalize in ad_keywords.yaml are calibrated to that scale, and
+            # counting distinct frames makes short (2-3 s) recurring stingers fall below
+            # min_support and silently stop being detected. Only the pairings themselves are
+            # never stored - that, not the counting, is what bounds memory.
             for fb in frames_b:
                 delta = fb - fa
                 state = delta_state.get(delta)
                 if state is None:
-                    delta_state[delta] = [fa, 1, fa]
+                    delta_state[delta] = [fa, occurrences_at_fa, fa]
                     continue
                 last_fa, count, cluster_start = state
-                if last_fa == fa:
-                    continue
                 if fa - last_fa <= merge_gap_frames:
                     state[0] = fa
-                    state[1] = count + 1
+                    state[1] = count + occurrences_at_fa
                 else:
                     add_candidate(delta, cluster_start, last_fa, count)
-                    delta_state[delta] = [fa, 1, fa]
+                    delta_state[delta] = [fa, occurrences_at_fa, fa]
 
     for delta, state in delta_state.items():
         last_fa, count, cluster_start = state

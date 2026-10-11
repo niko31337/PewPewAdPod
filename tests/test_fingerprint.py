@@ -191,3 +191,57 @@ def test_spectrogram_peaks_memory_does_not_scale_with_episode_length():
     # would need ~6x the memory of 1h. Chunked, peak memory is bounded by chunk size
     # regardless of how many chunks there are - it should barely move.
     assert peak_6h < peak_1h * 1.5
+
+
+def _reference_best_cluster_support(a, b, *, frame_size, hop_size, num_peaks, fan_out, target_frames, merge_gap_frames):
+    """The original, memory-hungry algorithm, kept here only as an oracle: materialise
+    every (fa, fb) pairing per delta and count cluster members. Fine on test-sized input."""
+    from collections import defaultdict
+
+    from app.services.fingerprint import _build_fingerprints
+
+    fp_a = _build_fingerprints(_spectrogram_peaks(a, frame_size, hop_size, num_peaks), fan_out, target_frames)
+    fp_b = _build_fingerprints(_spectrogram_peaks(b, frame_size, hop_size, num_peaks), fan_out, target_frames)
+    delta_hits = defaultdict(list)
+    for h in fp_a.keys() & fp_b.keys():
+        for fa in fp_a[h]:
+            for fb in fp_b[h]:
+                delta_hits[fb - fa].append(fa)
+
+    best = 0
+    for hits in delta_hits.values():
+        hits.sort()
+        cluster_len = 1
+        for prev, cur in zip(hits, hits[1:]):
+            if cur - prev <= merge_gap_frames:
+                cluster_len += 1
+            else:
+                best = max(best, cluster_len)
+                cluster_len = 1
+        best = max(best, cluster_len)
+    return best
+
+
+def test_support_counts_every_hash_pairing_like_the_original_algorithm():
+    # The streaming rewrite stopped storing the pairings (that is what bounds memory) but
+    # must keep counting them: ad_keywords.yaml's min_support / support_normalize are
+    # calibrated to that scale. Counting distinct frames instead made short recurring
+    # stingers (2-3 s) fall below min_support and silently stop being detected - on real
+    # episodes the original found 9 matches where the distinct-frame count found 3.
+    shared = _tone_burst(1.5)
+    episode_a = _white_noise(8.0, seed=1)
+    episode_b = _white_noise(6.0, seed=2)
+    episode_a[int(2.0 * SR) : int(2.0 * SR) + len(shared)] = shared
+    episode_b[int(1.0 * SR) : int(1.0 * SR) + len(shared)] = shared
+
+    params = dict(frame_size=256, hop_size=128, num_peaks=3, fan_out=3, target_frames=15, merge_gap_frames=5)
+    candidates = find_repeated_segments_in_samples(
+        episode_a, episode_b, target_sample_rate=SR, min_support=5, **params
+    )
+    expected = _reference_best_cluster_support(episode_a, episode_b, **params)
+
+    assert candidates
+    assert max(c.support for c in candidates) == expected
+    # guard against the test passing vacuously: sustained tones hit many hashes per frame,
+    # so the pairing count must clearly exceed the number of frames the segment spans
+    assert expected > 1.5 * (1.5 * SR / 128)
