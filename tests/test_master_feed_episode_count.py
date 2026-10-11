@@ -134,3 +134,16 @@ def test_master_feed_skips_episodes_missing_processed_audio_without_shrinking_th
     assert "Middle, has audio" in response.text
     assert "Oldest, has audio" in response.text
     assert "Newest, evicted audio" not in response.text
+
+
+def test_master_feed_lists_entries_newest_first_in_the_xml():
+    # feedgen's add_entry() prepends by default, which silently reversed the sorted list:
+    # the XML came out oldest-first even though the code sorts newest-first - and made
+    # "preferred feeds first" end up last. The document order must match the sort order.
+    client, engine = _make_client()
+    with Session(engine) as session:
+        _seed_feed_with_episodes(session, n=3, episodes_per_podcast=3)
+
+    body = client.get("/feed/master.xml").text
+
+    assert body.index("Episode 2") < body.index("Episode 1") < body.index("Episode 0")

@@ -19,7 +19,7 @@ def _client():
             yield session
 
     app.dependency_overrides[get_session] = override_session
-    return TestClient(app), engine
+    return TestClient(app, follow_redirects=False), engine
 
 
 def _feed_with_review_episode(session, *, title: str, auto_cut: bool):

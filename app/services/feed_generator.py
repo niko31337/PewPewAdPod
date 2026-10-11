@@ -105,7 +105,9 @@ def build_master_feed_xml(
         sorted_entries = sorted(entries, key=lambda t: t[1].pubdate or t[1].created_at, reverse=True)
 
     for feed, ep, image_url in sorted_entries:
-        fe = fg.add_entry()
+        # feedgen's add_entry() defaults to order="prepend", which would reverse the
+        # order sorted above (newest-first / preferred-first would end up last in the XML).
+        fe = fg.add_entry(order="append")
         fe.id(ep.guid)
         fe.guid(ep.guid, permalink=False)
         fe.title(f"{ep.title} — {feed.title}")

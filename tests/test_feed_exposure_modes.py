@@ -23,7 +23,7 @@ def _client():
             yield session
 
     app.dependency_overrides[get_session] = override_session
-    return TestClient(app), engine
+    return TestClient(app, follow_redirects=False), engine
 
 
 def _seed_master_entries(session):
