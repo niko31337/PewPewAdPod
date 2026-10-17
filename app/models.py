@@ -102,6 +102,9 @@ class Episode(SQLModel, table=True):
     # Permanently excluded after the user marks the episode as already heard elsewhere.
     # Keep the row/GUID as a tombstone so feed polling does not queue it again.
     heard_elsewhere: bool = False
+    # Optional manual position in the Queue page's published-episode playlist.
+    # NULL means use the normal preferred/date-based ordering.
+    playlist_position: Optional[int] = None
 
     # Set when the podcaster replaces this episode's audio file after the fact (e.g. to
     # fix an error in the original). Populated by feed_ingest, processed by

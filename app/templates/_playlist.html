@@ -10,9 +10,14 @@
         <p class="muted">Die nächsten Episoden in der aktuellen Sammelfeed-Reihenfolge.</p>
       {% endif %}
     </div>
-    <div class="playlist-view-switch" role="group" aria-label="Ansicht">
-      <button type="button" class="secondary playlist-view-btn" data-view="table">Tabelle</button>
-      <button type="button" class="secondary playlist-view-btn" data-view="list">Liste</button>
+    <div style="display:flex;align-items:center;gap:0.45rem;flex-wrap:wrap;">
+      <div class="playlist-view-switch" role="group" aria-label="Ansicht">
+        <button type="button" class="secondary playlist-view-btn" data-view="table">Tabelle</button>
+        <button type="button" class="secondary playlist-view-btn" data-view="list">Liste</button>
+      </div>
+      <form method="post" action="/queue/playlist/reset" style="margin:0;" onsubmit="return confirm('Manuelle Reihenfolge zurücksetzen und wieder nach Datum sortieren?');">
+        <button type="submit" class="secondary" title="Manuelle Positionen löschen und die automatische Reihenfolge wiederherstellen">Auto-Reihenfolge</button>
+      </form>
     </div>
   </div>
 
@@ -21,6 +26,23 @@
     {{ playlist_rows|length }} Episode(n) · {{ playlist_per_feed }} pro Feed maximal
     <span id="playlist-feed-count">· alle Feeds</span>
   </p>
+
+  <form id="playlist-bulk-form" method="post" action="/queue/playlist/bulk-action" style="margin:0.65rem 0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:0.65rem;flex-wrap:wrap;padding:0.7rem 0.8rem;border:1px solid var(--border);border-radius:8px;background:var(--surface-muted);">
+      <div style="min-width:10rem;">
+        <strong>Mehrfachauswahl</strong>
+        <span id="playlist-bulk-count" class="muted small" aria-live="polite">0 ausgewählt</span>
+      </div>
+      <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;">
+        <button type="button" class="secondary" id="playlist-episodes-select-visible">Alle sichtbaren</button>
+        <button type="button" class="secondary" id="playlist-episodes-select-none">Auswahl leeren</button>
+        <button type="submit" name="action" value="heard_elsewhere" class="danger" data-playlist-requires-selection>Als gehört markieren</button>
+        <button type="submit" name="action" value="move_up" class="secondary" data-playlist-requires-selection>↑ Auswahl nach oben</button>
+        <button type="submit" name="action" value="move_down" class="secondary" data-playlist-requires-selection>↓ Auswahl nach unten</button>
+      </div>
+      <div class="muted small" style="flex-basis:100%;">Nach oben/unten verschiebt die ausgewählten Episoden jeweils um einen Platz und behält ihre Reihenfolge bei. „Als gehört markieren“ löscht die lokalen Dateien.</div>
+    </div>
+  </form>
 
   <details class="playlist-filters">
     <summary>Feeds auswählen</summary>
@@ -58,8 +80,13 @@
       </thead>
       <tbody>
       {% for row in playlist_rows %}
-        <tr class="playlist-row" data-feed-id="{{ row.feed.id }}">
-          <td class="playlist-position">{{ loop.index }}</td>
+        <tr class="playlist-row" data-feed-id="{{ row.feed.id }}" data-episode-id="{{ row.episode.id }}">
+          <td class="playlist-position">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:0.25rem;">
+              <input type="checkbox" class="playlist-episode-select" name="episode_ids" value="{{ row.episode.id }}" data-episode-id="{{ row.episode.id }}" form="playlist-bulk-form" aria-label="{{ row.episode.title }} auswählen" style="width:1.05rem;height:1.05rem;margin:0;accent-color:var(--accent);">
+              <span>{{ loop.index }}</span>
+            </div>
+          </td>
           <td><a href="/feeds/{{ row.feed.id }}">{{ row.feed_name }}</a></td>
           <td class="playlist-episode-title">{{ row.episode.title }}</td>
           <td><a href="{{ row.feed_url }}" target="_blank">Feed {{ row.feed.id }}</a></td>
@@ -67,6 +94,13 @@
           <td>{{ row.delta_duration }}</td>
           <td class="muted">{{ row.pubdate_display }}</td>
           <td class="playlist-heard-cell">
+            <form method="post" action="/queue/playlist/reorder" class="playlist-reorder-form" style="display:flex;align-items:center;gap:0.25rem;flex-wrap:wrap;margin:0 0 0.4rem;">
+              <input type="hidden" name="episode_id" value="{{ row.episode.id }}">
+              <input type="number" name="position" min="1" max="{{ playlist_rows|length }}" value="{{ loop.index }}" aria-label="Neue Playlist-Position für {{ row.episode.title }}" title="Zielposition" style="width:3.6rem;min-width:3.6rem;padding:0.25rem;">
+              <button type="submit" name="action" value="position" class="secondary" title="Auf diese Position verschieben" style="padding:0.25rem 0.4rem;">Setzen</button>
+              <button type="submit" name="action" value="top" class="secondary" title="An den Anfang verschieben" aria-label="{{ row.episode.title }} an den Anfang" style="padding:0.25rem 0.45rem;">↑</button>
+              <button type="submit" name="action" value="bottom" class="secondary" title="Ans Ende verschieben" aria-label="{{ row.episode.title }} ans Ende" style="padding:0.25rem 0.45rem;">↓</button>
+            </form>
             <form method="post" action="/queue/episodes/{{ row.episode.id }}/heard-elsewhere" class="playlist-heard-form">
               <label class="playlist-heard-control">
                 <input type="checkbox" class="playlist-heard-checkbox" aria-label="{{ row.episode.title }} als anderswo gehört markieren">
@@ -82,8 +116,11 @@
 
   <div class="playlist-list-wrap" data-playlist-view="list" hidden>
     {% for row in playlist_rows %}
-    <article class="playlist-list-item playlist-row" data-feed-id="{{ row.feed.id }}">
-      <div class="playlist-list-position">{{ loop.index }}</div>
+    <article class="playlist-list-item playlist-row" data-feed-id="{{ row.feed.id }}" data-episode-id="{{ row.episode.id }}">
+      <div class="playlist-list-position" style="display:flex;flex-direction:column;align-items:center;gap:0.3rem;">
+        <input type="checkbox" class="playlist-episode-select" name="episode_ids" value="{{ row.episode.id }}" data-episode-id="{{ row.episode.id }}" form="playlist-bulk-form" aria-label="{{ row.episode.title }} auswählen" style="width:1.05rem;height:1.05rem;margin:0;accent-color:var(--accent);">
+        <span>{{ loop.index }}</span>
+      </div>
       <div class="playlist-list-main">
         <div class="playlist-list-podcast"><a href="/feeds/{{ row.feed.id }}">{{ row.feed_name }}</a></div>
         <div class="playlist-list-title">{{ row.episode.title }}</div>
@@ -93,6 +130,15 @@
           <span>Δ {{ row.delta_duration }}</span>
           <span>{{ row.pubdate_display }}</span>
         </div>
+        <form method="post" action="/queue/playlist/reorder" class="playlist-reorder-form playlist-reorder-form-list" style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;margin:0.6rem 0 0;">
+          <input type="hidden" name="episode_id" value="{{ row.episode.id }}">
+          <button type="submit" name="action" value="top" class="secondary" title="An den Anfang verschieben">↑ Anfang</button>
+          <button type="submit" name="action" value="bottom" class="secondary" title="Ans Ende verschieben">↓ Ende</button>
+          <label style="display:inline-flex;align-items:center;gap:0.25rem;">Position
+            <input type="number" name="position" min="1" max="{{ playlist_rows|length }}" value="{{ loop.index }}" aria-label="Neue Playlist-Position für {{ row.episode.title }}" style="width:4rem;min-width:4rem;padding:0.3rem;">
+          </label>
+          <button type="submit" name="action" value="position" class="secondary">Setzen</button>
+        </form>
         <form method="post" action="/queue/episodes/{{ row.episode.id }}/heard-elsewhere" class="playlist-heard-form playlist-heard-form-list">
           <label class="playlist-heard-control">
             <input type="checkbox" class="playlist-heard-checkbox" aria-label="{{ row.episode.title }} als anderswo gehört markieren">

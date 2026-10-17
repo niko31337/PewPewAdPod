@@ -140,22 +140,14 @@ def queue_page(request: Request, session: Session = Depends(get_session)):
     )
 
 
-@router.post("/queue/episodes/{episode_id}/heard-elsewhere")
-def mark_episode_heard_elsewhere(episode_id: int, session: Session = Depends(get_session)):
-    """Permanently exclude a published episode the user has already heard elsewhere.
+def _prepare_episode_as_heard_elsewhere(session: Session, episode: Episode):
+    """Mark a published episode as heard elsewhere in the current transaction.
 
-    The Episode row/GUID is retained as a tombstone so RSS polling won't re-create it.
-    Database state is committed before deleting files, and file deletion is restricted to
-    the app's configured audio/transcript/cover directories.
+    Returns file-cleanup metadata; the caller commits first and deletes files only after
+    the database transaction succeeds.
     """
-    episode = session.get(Episode, episode_id)
-    if episode is None:
-        return RedirectResponse(url="/queue#playlist", status_code=303)
-    if episode.heard_elsewhere:
-        return RedirectResponse(url="/queue#playlist", status_code=303)
-    # This action is intended for published rows shown in the playlist, not work in progress.
-    if episode.status != EpisodeStatus.PUBLISHED:
-        return RedirectResponse(url="/queue#playlist", status_code=303)
+    if episode.heard_elsewhere or episode.status != EpisodeStatus.PUBLISHED:
+        return None
 
     stored_paths = {
         "original_audio_path": episode.original_audio_path,
@@ -165,6 +157,7 @@ def mark_episode_heard_elsewhere(episode_id: int, session: Session = Depends(get
         "local_image_path": episode.local_image_path,
     }
     feed_id = episode.feed_id
+    episode_id = episode.id
 
     episode.heard_elsewhere = True
     episode.status = EpisodeStatus.SKIPPED
@@ -179,15 +172,175 @@ def mark_episode_heard_elsewhere(episode_id: int, session: Session = Depends(get
     episode.correction_status = None
     episode.correction_error_message = None
     episode.correction_detected_at = None
+    episode.playlist_position = None
     episode.updated_at = datetime.now(timezone.utc)
 
     for segment in session.exec(select(AdSegment).where(AdSegment.episode_id == episode_id)).all():
         session.delete(segment)
     session.add(episode)
-    session.commit()
+    return (episode_id, feed_id, stored_paths, episode.title)
 
-    _delete_episode_local_files(episode_id, feed_id, stored_paths)
-    log.info("Episode %s (%s) marked as heard elsewhere; local files removed", episode_id, episode.title)
+
+def _persist_playlist_order(session: Session, entries: list[tuple[Feed, Episode]]) -> None:
+    """Persist dense manual positions for the current playlist and clear stale ranks."""
+    selected_ids = {episode.id for _, episode in entries}
+    positioned_episodes = session.exec(
+        select(Episode).where(Episode.playlist_position.is_not(None))
+    ).all()
+    for episode in positioned_episodes:
+        if episode.id not in selected_ids:
+            episode.playlist_position = None
+            session.add(episode)
+
+    for new_position, (_, episode) in enumerate(entries, start=1):
+        episode.playlist_position = new_position * 10
+        session.add(episode)
+
+
+def _move_selected_playlist_entries(
+    entries: list[tuple[Feed, Episode]], selected_ids: set[int], direction: str
+) -> list[tuple[Feed, Episode]]:
+    """Move selected episodes one place as a block, preserving their relative order."""
+    if direction == "move_up":
+        for index in range(1, len(entries)):
+            current_id = entries[index][1].id
+            previous_id = entries[index - 1][1].id
+            if current_id in selected_ids and previous_id not in selected_ids:
+                entries[index - 1], entries[index] = entries[index], entries[index - 1]
+    elif direction == "move_down":
+        for index in range(len(entries) - 2, -1, -1):
+            current_id = entries[index][1].id
+            next_id = entries[index + 1][1].id
+            if current_id in selected_ids and next_id not in selected_ids:
+                entries[index], entries[index + 1] = entries[index + 1], entries[index]
+    return entries
+
+
+@router.post("/queue/episodes/{episode_id}/heard-elsewhere")
+def mark_episode_heard_elsewhere(episode_id: int, session: Session = Depends(get_session)):
+    """Permanently exclude a published episode and delete its local media files."""
+    episode = session.get(Episode, episode_id)
+    cleanup = _prepare_episode_as_heard_elsewhere(session, episode) if episode else None
+    if cleanup is None:
+        return RedirectResponse(url="/queue#playlist", status_code=303)
+
+    session.commit()
+    cleanup_episode_id, feed_id, stored_paths, title = cleanup
+    _delete_episode_local_files(cleanup_episode_id, feed_id, stored_paths)
+    log.info("Episode %s (%s) marked as heard elsewhere; local files removed", cleanup_episode_id, title)
+    return RedirectResponse(url="/queue#playlist", status_code=303)
+
+
+@router.post("/queue/playlist/bulk-action")
+def bulk_playlist_action(
+    action: str = Form(...),
+    episode_ids: list[int] = Form(default=[]),
+    session: Session = Depends(get_session),
+):
+    """Mark selected playlist episodes heard or move them up/down as one ordered group."""
+    if action not in {"heard_elsewhere", "move_up", "move_down"} or not episode_ids:
+        return RedirectResponse(url="/queue#playlist", status_code=303)
+
+    app_config = cache_manager.get_or_create_config(session)
+    entries = select_playlist_entries(
+        session,
+        episodes_per_feed=app_config.master_feed_episodes_per_podcast,
+        preferred_first=app_config.feed_exposure_mode == "master_preferred",
+    )
+    current_ids = {episode.id for _, episode in entries}
+    selected_ids = set(episode_ids) & current_ids
+    if not selected_ids:
+        return RedirectResponse(url="/queue#playlist", status_code=303)
+
+    if action == "heard_elsewhere":
+        cleanup_items = []
+        for _, episode in entries:
+            if episode.id in selected_ids:
+                cleanup = _prepare_episode_as_heard_elsewhere(session, episode)
+                if cleanup is not None:
+                    cleanup_items.append(cleanup)
+        if cleanup_items:
+            # Commit all episode/segment changes together before removing local files.
+            session.commit()
+            for cleanup_episode_id, feed_id, stored_paths, title in cleanup_items:
+                _delete_episode_local_files(cleanup_episode_id, feed_id, stored_paths)
+                log.info(
+                    "Episode %s (%s) marked as heard elsewhere via bulk action; local files removed",
+                    cleanup_episode_id,
+                    title,
+                )
+    else:
+        entries = _move_selected_playlist_entries(entries, selected_ids, action)
+        _persist_playlist_order(session, entries)
+        session.commit()
+        log.info(
+            "Queue playlist bulk-moved episodes %s direction=%s",
+            sorted(selected_ids),
+            action,
+        )
+
+    return RedirectResponse(url="/queue#playlist", status_code=303)
+
+
+@router.post("/queue/playlist/reset")
+def reset_playlist_order(session: Session = Depends(get_session)):
+    """Return the playlist to the normal preferred/date-based order."""
+    positioned_episodes = session.exec(
+        select(Episode).where(Episode.playlist_position.is_not(None))
+    ).all()
+    reset_count = len(positioned_episodes)
+    for episode in positioned_episodes:
+        episode.playlist_position = None
+        session.add(episode)
+    session.commit()
+    log.info("Reset manual playlist order for %s episodes", reset_count)
+    return RedirectResponse(url="/queue#playlist", status_code=303)
+
+
+@router.post("/queue/playlist/reorder")
+def reorder_playlist_episode(
+    episode_id: int = Form(...),
+    action: str = Form(...),
+    position: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    """Move one visible playlist episode and persist the new order for this playlist.
+
+    Positions are 1-based. Only entries currently selected for the Queue playlist can
+    be moved, which keeps the action aligned with the master-feed selection settings.
+    """
+    if action not in {"top", "bottom", "position"}:
+        return RedirectResponse(url="/queue#playlist", status_code=303)
+
+    app_config = cache_manager.get_or_create_config(session)
+    entries = select_playlist_entries(
+        session,
+        episodes_per_feed=app_config.master_feed_episodes_per_podcast,
+        preferred_first=app_config.feed_exposure_mode == "master_preferred",
+    )
+    current_ids = [episode.id for _, episode in entries]
+    if episode_id not in current_ids:
+        return RedirectResponse(url="/queue#playlist", status_code=303)
+
+    moving_index = current_ids.index(episode_id)
+    moving = entries.pop(moving_index)
+    if action == "top":
+        target_index = 0
+    elif action == "bottom":
+        target_index = len(entries)
+    else:
+        try:
+            requested_position = int(position)
+        except (TypeError, ValueError):
+            return RedirectResponse(url="/queue#playlist", status_code=303)
+        if requested_position < 1:
+            return RedirectResponse(url="/queue#playlist", status_code=303)
+        target_index = min(requested_position - 1, len(entries))
+
+    entries.insert(target_index, moving)
+    _persist_playlist_order(session, entries)
+    session.commit()
+    log.info("Queue playlist reordered episode %s action=%s position=%s", episode_id, action, target_index + 1)
     return RedirectResponse(url="/queue#playlist", status_code=303)
 
 

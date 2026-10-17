@@ -31,8 +31,21 @@ def select_playlist_entries(
         chosen = [episode for episode in candidates if episode.processed_audio_path][:limit]
         entries.extend((feed, episode) for episode in chosen)
 
+    # Establish the natural order first. Episodes with explicit positions follow the
+    # saved user order; unpositioned episodes (typically newly published episodes) are
+    # appended in natural order so new arrivals do not disrupt the user's queue.
+    # After the first manual move, the reorder endpoint assigns a position to every
+    # currently selected entry.
     if preferred_first:
         entries.sort(key=lambda pair: (pair[0].preferred, pair[1].pubdate or pair[1].created_at), reverse=True)
     else:
         entries.sort(key=lambda pair: pair[1].pubdate or pair[1].created_at, reverse=True)
+
+    if any(episode.playlist_position is not None for _, episode in entries):
+        manually_positioned = sorted(
+            (pair for pair in entries if pair[1].playlist_position is not None),
+            key=lambda pair: pair[1].playlist_position,
+        )
+        natural_unpositioned = [pair for pair in entries if pair[1].playlist_position is None]
+        entries = manually_positioned + natural_unpositioned
     return entries

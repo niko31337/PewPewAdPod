@@ -381,13 +381,39 @@ audio { width: 100%; margin: 0.25rem 0 0.75rem; }
   font-size: 0.84rem;
 }
 .playlist-feed-option span { overflow-wrap: anywhere; }
-.playlist-table-wrap { overflow-x: auto; }
-.playlist-table { min-width: 820px; margin-top: 0; }
-.playlist-table th { white-space: nowrap; }
+/* Keep the bulk controls outside the independently scrolling episode panes. */
+.playlist-table-wrap {
+  position: relative;
+  max-height: min(65vh, 680px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 8px;
+}
+.playlist-table {
+  min-width: 820px;
+  margin-top: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.playlist-table th {
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-muted);
+  box-shadow: 0 1px 0 var(--border);
+}
 .playlist-episode-title { min-width: 260px; }
 .playlist-table td { vertical-align: middle; }
 .playlist-position { width: 2.2rem; color: var(--text-muted); font-weight: 700; }
-.playlist-list-wrap { display: grid; gap: 0.55rem; }
+.playlist-list-wrap {
+  display: grid;
+  gap: 0.55rem;
+  max-height: min(65vh, 680px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.15rem;
+}
 .playlist-list-wrap[hidden], .playlist-table-wrap[hidden], .playlist-row[hidden] { display: none !important; }
 .playlist-list-item {
   display: flex;
@@ -425,4 +451,90 @@ audio { width: 100%; margin: 0.25rem 0 0.75rem; }
   .playlist-header { flex-direction: column; }
   .playlist-view-switch { width: 100%; }
   .playlist-view-btn { flex: 1; }
+}
+
+/* ---- Playlist heard action visibility fix ---- */
+.playlist-table-wrap {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+  isolation: isolate;
+  scrollbar-gutter: stable;
+}
+
+/* Keep the action available even when the wide table is scrolled horizontally. */
+.playlist-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.playlist-table thead th:last-child,
+.playlist-table td.playlist-heard-cell {
+  position: sticky;
+  right: 0;
+  width: 178px;
+  min-width: 178px;
+  max-width: 178px;
+}
+.playlist-table thead th:last-child {
+  z-index: 4;
+  background: var(--surface-muted);
+  box-shadow: -7px 0 10px rgba(0, 0, 0, 0.10);
+}
+.playlist-table td.playlist-heard-cell {
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: -7px 0 10px rgba(0, 0, 0, 0.12);
+}
+.playlist-heard-form {
+  margin: 0;
+  min-width: 0;
+}
+.playlist-heard-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: normal;
+}
+.playlist-heard-control span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.playlist-heard-checkbox {
+  appearance: auto;
+  display: inline-block;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 1.15rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.playlist-heard-checkbox:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.playlist-heard-form-list .playlist-heard-control {
+  margin-top: 0.15rem;
+}
+@media (max-width: 720px) {
+  .playlist-table thead th:last-child,
+  .playlist-table td.playlist-heard-cell {
+    width: 160px;
+    min-width: 160px;
+    max-width: 160px;
+  }
+  .playlist-heard-control {
+    padding: 0.4rem;
+    gap: 0.4rem;
+  }
 }

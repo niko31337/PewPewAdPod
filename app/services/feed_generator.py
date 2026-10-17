@@ -96,13 +96,23 @@ def build_master_feed_xml(
     fg.podcast.itunes_author("PewPewAdPod")
 
     if preferred_first:
-        sorted_entries = sorted(
+        natural_order = sorted(
             entries,
             key=lambda t: (t[0].preferred, t[1].pubdate or t[1].created_at),
             reverse=True,
         )
     else:
-        sorted_entries = sorted(entries, key=lambda t: t[1].pubdate or t[1].created_at, reverse=True)
+        natural_order = sorted(entries, key=lambda t: t[1].pubdate or t[1].created_at, reverse=True)
+
+    if any(episode.playlist_position is not None for _, episode, _ in entries):
+        manually_positioned = sorted(
+            (item for item in entries if item[1].playlist_position is not None),
+            key=lambda item: item[1].playlist_position,
+        )
+        unpositioned = [item for item in natural_order if item[1].playlist_position is None]
+        sorted_entries = manually_positioned + unpositioned
+    else:
+        sorted_entries = natural_order
 
     for feed, ep, image_url in sorted_entries:
         fe = fg.add_entry()

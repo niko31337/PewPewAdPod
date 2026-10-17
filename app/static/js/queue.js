@@ -131,3 +131,86 @@ document.addEventListener("DOMContentLoaded", () => {
   setView(initialView);
   applyFilter();
 })();
+
+
+// Playlist multi-selection: checkboxes in table and list are paired by episode id.
+(function () {
+  const playlist = document.querySelector('.playlist-card');
+  if (!playlist) return;
+
+  const form = playlist.querySelector('#playlist-bulk-form');
+  const boxes = Array.from(playlist.querySelectorAll('.playlist-episode-select'));
+  const count = playlist.querySelector('#playlist-bulk-count');
+  const selectVisibleButton = playlist.querySelector('#playlist-episodes-select-visible');
+  const selectNoneButton = playlist.querySelector('#playlist-episodes-select-none');
+  if (!form || boxes.length === 0) return;
+
+  function selectedIds() {
+    return new Set(boxes.filter(box => box.checked).map(box => box.dataset.episodeId));
+  }
+
+  function syncCount() {
+    const selected = selectedIds();
+    if (count) count.textContent = `${selected.size} ausgewählt`;
+    form.querySelectorAll('[data-playlist-requires-selection]').forEach(button => {
+      button.disabled = selected.size === 0;
+    });
+  }
+
+  boxes.forEach(box => box.addEventListener('change', () => {
+    const id = box.dataset.episodeId;
+    boxes.filter(other => other.dataset.episodeId === id).forEach(other => {
+      other.checked = box.checked;
+    });
+    syncCount();
+  }));
+
+  if (selectVisibleButton) selectVisibleButton.addEventListener('click', () => {
+    const selectedFeeds = new Set(
+      Array.from(playlist.querySelectorAll('.playlist-feed-select'))
+        .filter(box => box.checked)
+        .map(box => box.value)
+    );
+    const eligibleIds = new Set(
+      Array.from(playlist.querySelectorAll('.playlist-row'))
+        .filter(row => !row.hidden && selectedFeeds.has(row.dataset.feedId))
+        .map(row => row.dataset.episodeId)
+    );
+    boxes.forEach(box => { box.checked = eligibleIds.has(box.dataset.episodeId); });
+    syncCount();
+  });
+
+  if (selectNoneButton) selectNoneButton.addEventListener('click', () => {
+    boxes.forEach(box => { box.checked = false; });
+    syncCount();
+  });
+
+  form.addEventListener('submit', event => {
+    if (form.dataset.confirmed === 'true') {
+      delete form.dataset.confirmed;
+      return;
+    }
+    const selected = selectedIds();
+    if (selected.size === 0) {
+      event.preventDefault();
+      window.alert('Bitte mindestens eine Episode auswählen.');
+      return;
+    }
+    if (event.submitter && event.submitter.value === 'heard_elsewhere') {
+      event.preventDefault();
+      const approved = window.confirm(
+        `${selected.size} ausgewählte Episode(n) als anderswo gehört markieren? ` +
+        'Sie werden aus dem Feed entfernt. Lokale Audio-, Korrektur-, Transkript- ' +
+        'und Episoden-Cover-Dateien werden gelöscht. Die Episoden werden dauerhaft ' +
+        'von einer erneuten Verarbeitung ausgeschlossen.'
+      );
+      if (approved) {
+        form.dataset.confirmed = 'true';
+        // Re-submit without triggering the confirmation handler a second time.
+        form.requestSubmit(event.submitter);
+      }
+    }
+  });
+
+  syncCount();
+})();
