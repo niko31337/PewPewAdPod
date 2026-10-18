@@ -1,0 +1,60 @@
+/* Playlist bulk controls stay in view while the episode area scrolls.
+   Loaded after style.css so these rules win over earlier playlist experiments. */
+.playlist-card #playlist-bulk-form {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 50;
+  margin: 0.65rem 0;
+}
+
+.playlist-card #playlist-bulk-form > div {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+/* Only the episode panes scroll; the selection/action bar is their sibling. */
+.playlist-card .playlist-table-wrap {
+  position: relative;
+  max-height: min(65vh, 680px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.playlist-card .playlist-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.playlist-card .playlist-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface-muted);
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.playlist-card .playlist-list-wrap {
+  display: grid;
+  gap: 0.55rem;
+  max-height: min(65vh, 680px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.15rem;
+}
+
+.playlist-card .playlist-list-wrap[hidden],
+.playlist-card .playlist-table-wrap[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 720px) {
+  .playlist-card #playlist-bulk-form {
+    top: 0.25rem;
+  }
+  .playlist-card #playlist-bulk-form > div {
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+  }
+}
