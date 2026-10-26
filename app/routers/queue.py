@@ -99,7 +99,15 @@ def _playlist_row(session: Session, feed: Feed, episode: Episode) -> dict:
         "play_duration": _format_playlist_duration(processed_seconds),
         "delta_duration": f"−{_format_playlist_duration(delta_seconds)}" if delta_seconds is not None and delta_seconds >= 0.5 else "—",
         "original_duration": _format_playlist_duration(original_seconds),
-        "pubdate_display": (episode.pubdate.strftime("%Y-%m-%d") if episode.pubdate else ""),
+        # Original release date from the podcast RSS, formatted for German UI.
+        # Deliberately do not fall back to created_at (ingestion date).
+        "pubdate_display": (episode.pubdate.strftime("%d.%m.%Y") if episode.pubdate else "—"),
+        "pubdate_iso": (episode.pubdate.date().isoformat() if episode.pubdate else ""),
+        "pubdate_tooltip": (
+            f"RSS-Veröffentlichungsdatum: {episode.pubdate.isoformat(sep=' ', timespec='minutes')}"
+            if episode.pubdate
+            else "Kein Veröffentlichungsdatum im Podcast-RSS angegeben"
+        ),
         "feed_url": f"/feed/{feed.id}.xml",
     }
 

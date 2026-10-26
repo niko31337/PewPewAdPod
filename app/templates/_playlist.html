@@ -74,7 +74,7 @@
           <th>Feed</th>
           <th>Spielzeit</th>
           <th>Δ zu Original</th>
-          <th>Erscheinungsdatum</th>
+          <th class="playlist-pubdate-heading" title="Veröffentlichungsdatum laut Podcast-RSS">Erscheinungsdatum</th>
           <th>Aktion</th>
         </tr>
       </thead>
@@ -92,7 +92,13 @@
           <td><a href="{{ row.feed_url }}" target="_blank">Feed {{ row.feed.id }}</a></td>
           <td title="Original: {{ row.original_duration }}">{{ row.play_duration }}</td>
           <td>{{ row.delta_duration }}</td>
-          <td class="muted">{{ row.pubdate_display }}</td>
+          <td class="muted playlist-pubdate-cell" title="{{ row.pubdate_tooltip }}">
+            {% if row.pubdate_iso %}
+              <time datetime="{{ row.pubdate_iso }}">{{ row.pubdate_display }}</time>
+            {% else %}
+              <span class="playlist-pubdate-missing">{{ row.pubdate_display }}</span>
+            {% endif %}
+          </td>
           <td class="playlist-heard-cell">
             <form method="post" action="/queue/playlist/reorder" class="playlist-reorder-form" style="display:flex;align-items:center;gap:0.25rem;flex-wrap:wrap;margin:0 0 0.4rem;">
               <input type="hidden" name="episode_id" value="{{ row.episode.id }}">
@@ -128,7 +134,7 @@
           <span><a href="{{ row.feed_url }}" target="_blank">Feed {{ row.feed.id }}</a></span>
           <span>Spielzeit {{ row.play_duration }}</span>
           <span>Δ {{ row.delta_duration }}</span>
-          <span>{{ row.pubdate_display }}</span>
+          <span class="playlist-pubdate-meta" title="{{ row.pubdate_tooltip }}">Erschienen: {% if row.pubdate_iso %}<time datetime="{{ row.pubdate_iso }}">{{ row.pubdate_display }}</time>{% else %}<span class="playlist-pubdate-missing">{{ row.pubdate_display }}</span>{% endif %}</span>
         </div>
         <form method="post" action="/queue/playlist/reorder" class="playlist-reorder-form playlist-reorder-form-list" style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;margin:0.6rem 0 0;">
           <input type="hidden" name="episode_id" value="{{ row.episode.id }}">

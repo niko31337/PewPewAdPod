@@ -1,0 +1,95 @@
+/* Queue playlist: readable release-date column and balanced table widths.
+   Loaded after the existing styles so earlier playlist overrides do not win. */
+.playlist-card {
+  --playlist-action-width: 242px;
+  --playlist-date-width: 132px;
+}
+
+.playlist-card .playlist-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.playlist-card .playlist-table {
+  width: 100%;
+  min-width: 1180px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Stable metadata widths; the episode title receives the remaining space. */
+.playlist-card .playlist-table th:nth-child(1),
+.playlist-card .playlist-table td:nth-child(1) { width: 48px; }
+.playlist-card .playlist-table th:nth-child(2),
+.playlist-card .playlist-table td:nth-child(2) { width: 150px; }
+.playlist-card .playlist-table th:nth-child(4),
+.playlist-card .playlist-table td:nth-child(4) { width: 76px; }
+.playlist-card .playlist-table th:nth-child(5),
+.playlist-card .playlist-table td:nth-child(5) { width: 84px; }
+.playlist-card .playlist-table th:nth-child(6),
+.playlist-card .playlist-table td:nth-child(6) { width: 100px; }
+.playlist-card .playlist-table th:nth-child(7),
+.playlist-card .playlist-table td:nth-child(7) {
+  width: var(--playlist-date-width);
+  min-width: var(--playlist-date-width);
+  max-width: var(--playlist-date-width);
+  position: sticky;
+  right: var(--playlist-action-width);
+  white-space: nowrap;
+}
+.playlist-card .playlist-table th:nth-child(8),
+.playlist-card .playlist-table td:nth-child(8) {
+  width: var(--playlist-action-width);
+  min-width: var(--playlist-action-width);
+  max-width: var(--playlist-action-width);
+  position: sticky;
+  right: 0;
+}
+
+.playlist-card .playlist-table thead th:nth-child(7) {
+  z-index: 5;
+  background: var(--surface-muted);
+  box-shadow: -6px 0 8px rgba(0, 0, 0, 0.08);
+}
+.playlist-card .playlist-table tbody td:nth-child(7) {
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: -6px 0 8px rgba(0, 0, 0, 0.08);
+  font-variant-numeric: tabular-nums;
+}
+.playlist-card .playlist-table thead th:nth-child(8) {
+  z-index: 6;
+  background: var(--surface-muted);
+  box-shadow: -6px 0 8px rgba(0, 0, 0, 0.1);
+}
+.playlist-card .playlist-table tbody td:nth-child(8) {
+  z-index: 3;
+  background: var(--surface);
+  box-shadow: -6px 0 8px rgba(0, 0, 0, 0.1);
+}
+
+.playlist-card .playlist-pubdate-heading {
+  white-space: normal;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.playlist-card .playlist-pubdate-cell time,
+.playlist-card .playlist-pubdate-meta time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.playlist-card .playlist-pubdate-missing { opacity: 0.75; }
+.playlist-card .playlist-episode-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+@media (max-width: 720px) {
+  .playlist-card {
+    --playlist-action-width: 228px;
+    --playlist-date-width: 124px;
+  }
+}
