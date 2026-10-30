@@ -16,6 +16,54 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _get_feed_episode_stats(session: Session, feed_ids: list[int]) -> dict[int, dict[str, int]]:
+    """Return per-feed episode counters using one grouped query.
+
+    Episodes marked as heard elsewhere are permanent tombstones and are excluded.
+    SKIPPED episodes remain part of the total, but are not counted as work remaining.
+    """
+    stats = {
+        feed_id: {"total": 0, "published": 0, "errors": 0, "remaining": 0, "skipped": 0}
+        for feed_id in feed_ids
+    }
+    if not feed_ids:
+        return stats
+
+    error_statuses = {
+        EpisodeStatus.FAILED_DOWNLOAD.value,
+        EpisodeStatus.FAILED_TRANSCRIBE.value,
+        EpisodeStatus.FAILED_ANALYZE.value,
+        EpisodeStatus.FAILED_CUT.value,
+        EpisodeStatus.ERROR_PERMANENT.value,
+    }
+    rows = session.exec(
+        select(Episode.feed_id, Episode.status, func.count(Episode.id))
+        .where(Episode.feed_id.in_(feed_ids))
+        .where(Episode.heard_elsewhere == False)  # noqa: E712
+        .group_by(Episode.feed_id, Episode.status)
+    ).all()
+
+    for feed_id, raw_status, raw_count in rows:
+        if feed_id not in stats:
+            continue
+        status = raw_status.value if hasattr(raw_status, "value") else str(raw_status)
+        count = int(raw_count or 0)
+        feed_stats = stats[feed_id]
+        feed_stats["total"] += count
+
+        if status == EpisodeStatus.PUBLISHED.value:
+            feed_stats["published"] += count
+        elif status in error_statuses:
+            feed_stats["errors"] += count
+        elif status == EpisodeStatus.SKIPPED.value:
+            feed_stats["skipped"] += count
+        else:
+            # NEW, REANALYZE, in-progress and PENDING_REVIEW all need attention.
+            feed_stats["remaining"] += count
+
+    return stats
+
+
 def _queue_pending_review_episodes(session: Session, feed_ids: set[int] | list[int]) -> int:
     """Queue pending-review episodes for normal analysis and Auto-Cut processing."""
     selected_ids = sorted({feed_id for feed_id in feed_ids if feed_id is not None})
@@ -41,6 +89,7 @@ def index(
     request: Request,
     opml_imported: int | None = None,
     requeued: int | None = None,
+    heard_count: int | None = None,
     session: Session = Depends(get_session),
 ):
     feeds = session.exec(select(Feed).order_by(Feed.created_at)).all()
@@ -49,6 +98,7 @@ def index(
     # still have a processed audio file are candidates. Pick the most recently
     # published episode per feed (not the most recent RSS entry/import).
     feed_ids = [feed.id for feed in feeds if feed.id is not None]
+    feed_episode_stats = _get_feed_episode_stats(session, feed_ids)
     latest_published_by_feed = {}
     if feed_ids:
         ranked_episodes = (
@@ -85,7 +135,9 @@ def index(
             "opml_imported": opml_imported,
             "feed_exposure_mode": feed_exposure_mode,
             "latest_published_by_feed": latest_published_by_feed,
+            "feed_episode_stats": feed_episode_stats,
             "requeued": requeued,
+            "heard_count": heard_count,
         },
     )
 

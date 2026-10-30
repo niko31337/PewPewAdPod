@@ -10,7 +10,6 @@ from app.templating import templates
 
 router = APIRouter()
 
-RECENT_EPISODES_SHOWN = 5
 
 _QUEUED_STATUSES = [EpisodeStatus.NEW, EpisodeStatus.REANALYZE]
 
@@ -35,11 +34,11 @@ def feed_detail(
     feed = session.get(Feed, feed_id)
     if feed is None:
         return RedirectResponse(url="/", status_code=303)
+    # Show the complete feed history so feed-level bulk actions can target any episode.
     episodes = session.exec(
         select(Episode)
         .where(Episode.feed_id == feed_id)
         .order_by(Episode.created_at.desc())
-        .limit(RECENT_EPISODES_SHOWN)
     ).all()
     positions = _queue_positions(session)
     return templates.TemplateResponse(

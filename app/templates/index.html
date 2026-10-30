@@ -13,6 +13,17 @@
 </div>
 {% endif %}
 
+{% if heard_count is not none %}
+<div class="card" role="status">
+  {% if heard_count > 0 %}
+    <p><strong>{{ heard_count }} veröffentlichte Episode(n) als „Anderswo gehört“ markiert.</strong></p>
+    <p class="muted small">Die Episoden wurden aus den Podcast-Feeds entfernt und ihre lokalen Episodendateien gelöscht.</p>
+  {% else %}
+    <p>Für diesen Podcast gab es keine noch veröffentlichten Episoden zum Markieren.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if opml_imported is not none %}
 <div class="card">
   {% if opml_imported > 0 %}
@@ -92,7 +103,7 @@
 {% endif %}
 
 {% for feed in feeds %}
-<div class="card feed-card">
+<div class="card feed-card" id="feed-{{ feed.id }}">
   <div class="feed-card-main">
     <div class="feed-select-wrap">
       <input type="checkbox" class="feed-select" name="feed_ids" value="{{ feed.id }}" form="bulk-feed-form" aria-label="{{ feed.title }} auswählen">
@@ -135,9 +146,35 @@
           <span class="feed-latest-published-date">—</span>
         {% endif %}
       </div>
+      {% set stats = feed_episode_stats.get(feed.id, {"total": 0, "published": 0, "errors": 0, "remaining": 0, "skipped": 0}) %}
+      <section class="feed-episode-stats" aria-label="Episodenstatistik für {{ feed.title }}">
+        <div class="feed-episode-stats-heading">Episoden-Statistik</div>
+        <div class="feed-episode-stats-grid">
+          <div class="feed-episode-stat">
+            <strong class="feed-episode-stat-value">{{ stats.total }}</strong>
+            <span class="feed-episode-stat-label">Gesamt</span>
+          </div>
+          <div class="feed-episode-stat feed-episode-stat-published">
+            <strong class="feed-episode-stat-value">{{ stats.published }}</strong>
+            <span class="feed-episode-stat-label">Werbefrei</span>
+          </div>
+          <div class="feed-episode-stat feed-episode-stat-errors">
+            <strong class="feed-episode-stat-value">{{ stats.errors }}</strong>
+            <span class="feed-episode-stat-label">Fehler</span>
+          </div>
+          <div class="feed-episode-stat feed-episode-stat-remaining">
+            <strong class="feed-episode-stat-value">{{ stats.remaining }}</strong>
+            <span class="feed-episode-stat-label" title="Neu, wartend, in Verarbeitung oder manuelle Review">Noch offen</span>
+          </div>
+        </div>
+        <div class="feed-episode-stats-note">
+          „Anderswo gehört“ nicht mitgezählt
+          {% if stats.skipped %} · {{ stats.skipped }} übersprungen{% endif %}
+        </div>
+      </section>
       <form method="post" action="/feeds/{{ feed.id }}/toggle-preferred" class="preferred-feed-form">
         <label class="preferred-feed-label">
-          <input type="checkbox" name="preferred" value="true" onchange="this.form.submit()" {% if feed.preferred %}checked{% endif %}>
+          <input type="checkbox" name="preferred" value="true" {% if feed.preferred %}checked{% endif %}>
           Bevorzugter Feed
         </label>
         {% if feed_exposure_mode != "master_preferred" %}
@@ -161,6 +198,10 @@
       <button class="secondary">Review-Episoden nachholen</button>
     </form>
     {% endif %}
+    <form method="post" action="/feeds/{{ feed.id }}/episodes/heard-all"
+          onsubmit="return confirm('Alle bereits veröffentlichten Episoden dieses Podcasts dauerhaft als „Anderswo gehört“ markieren? Sie werden aus den Feeds entfernt und alle lokalen Audio-, Korrektur-, Transkript- und Episoden-Cover-Dateien werden gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.');">
+      <button class="danger" title="Alle veröffentlichten Episoden dieses Podcasts dauerhaft ausschließen und lokale Dateien löschen">Alles gehört</button>
+    </form>
     <form method="post" action="/feeds/{{ feed.id }}/delete" onsubmit="return confirm('Feed wirklich löschen?');"><button class="danger">Löschen</button></form>
   </div>
 </div>
@@ -201,6 +242,139 @@
   });
 
   updateCount();
+})();
+
+// Preserve the current place for every action initiated on the start page.
+// A fresh state is written immediately before every POST/navigation, so a later
+// action (for example changing "Bevorzugter Feed") always replaces an older one.
+(function () {
+  const storageKey = 'pewpewadpod:start-scroll:v2';
+  const maxAgeMs = 10 * 60 * 1000;
+  let store;
+  try { store = window.sessionStorage; } catch (_) { return; }
+  if (!store) return;
+
+  function findAnchor(source) {
+    if (source && typeof source.closest === 'function') {
+      const card = source.closest('.feed-card');
+      if (card && card.id) return card;
+    }
+    // Toolbar/bulk actions are not inside a podcast card. Use the first card
+    // intersecting the viewport as a stable visual anchor, if one is visible.
+    const cards = Array.from(document.querySelectorAll('.feed-card'));
+    return cards.find(card => {
+      const rect = card.getBoundingClientRect();
+      return rect.bottom > 0 && rect.top < window.innerHeight;
+    }) || null;
+  }
+
+  function savePosition(source) {
+    const anchor = findAnchor(source);
+    const state = {
+      savedAt: Date.now(),
+      sourcePath: window.location.pathname,
+      scrollY: window.scrollY || window.pageYOffset || 0,
+      anchorId: anchor ? anchor.id : '',
+      anchorTop: anchor ? anchor.getBoundingClientRect().top : null,
+      innerScroll: Array.from(document.querySelectorAll(
+        '.playlist-table-wrap, .playlist-list-wrap, .playlist-feed-options'
+      )).map((element, index) => ({
+        index,
+        top: element.scrollTop,
+        left: element.scrollLeft
+      }))
+    };
+    try { store.setItem(storageKey, JSON.stringify(state)); } catch (_) {
+      // Browser storage can be disabled; ordinary browser history remains usable.
+    }
+  }
+
+  function restorePosition() {
+    let state = null;
+    try {
+      const raw = store.getItem(storageKey);
+      if (!raw) return;
+      state = JSON.parse(raw);
+      if (!state || !Number.isFinite(state.savedAt) ||
+          Date.now() - state.savedAt > maxAgeMs) {
+        store.removeItem(storageKey);
+        return;
+      }
+      // Keep the token while a navigation is on a different page. This allows
+      // Back from a feed detail page to restore the originating start-page spot.
+      if (state.sourcePath !== window.location.pathname) return;
+      store.removeItem(storageKey);
+    } catch (_) {
+      try { store.removeItem(storageKey); } catch (__) {}
+      return;
+    }
+
+    const apply = () => {
+      let restoredByAnchor = false;
+      const anchor = state.anchorId ? document.getElementById(state.anchorId) : null;
+      if (anchor && Number.isFinite(state.anchorTop)) {
+        const currentTop = anchor.getBoundingClientRect().top;
+        window.scrollTo(0, Math.max(0, window.scrollY + currentTop - state.anchorTop));
+        restoredByAnchor = true;
+      }
+      if (!restoredByAnchor && Number.isFinite(state.scrollY)) {
+        window.scrollTo(0, Math.max(0, state.scrollY));
+      }
+      if (Array.isArray(state.innerScroll)) {
+        const elements = document.querySelectorAll(
+          '.playlist-table-wrap, .playlist-list-wrap, .playlist-feed-options'
+        );
+        state.innerScroll.forEach(item => {
+          const element = elements[item.index];
+          if (!element) return;
+          if (Number.isFinite(item.top)) element.scrollTop = item.top;
+          if (Number.isFinite(item.left)) element.scrollLeft = item.left;
+        });
+      }
+    };
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => window.setTimeout(apply, 80));
+    });
+  }
+
+  // Covers all normal POST forms on the start page, including bulk actions,
+  // refresh/activate/deactivate, Auto-Cut, "Alles gehört" and feed deletion.
+  document.addEventListener('submit', event => {
+    if (event.defaultPrevented) return;
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if ((form.getAttribute('method') || 'get').toLowerCase() !== 'post') return;
+    savePosition(form);
+  });
+
+  // The preferred-feed checkbox uses a programmatic form.submit(), which does
+  // not emit a submit event. Save first, then submit it ourselves.
+  document.querySelectorAll('.preferred-feed-form input[name="preferred"]').forEach(input => {
+    input.addEventListener('change', () => {
+      savePosition(input);
+      if (input.form) input.form.submit();
+    });
+  });
+
+  // Also remember the position before navigating from a feed card to its detail
+  // page; this is used when the user returns with the browser Back button.
+  document.addEventListener('click', event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
+        event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest && event.target.closest('a[href]');
+    if (!link || link.target === '_blank' || link.hasAttribute('download')) return;
+    let destination;
+    try { destination = new URL(link.href, window.location.href); } catch (_) { return; }
+    if (destination.origin !== window.location.origin) return;
+    if (destination.pathname === window.location.pathname &&
+        destination.search === window.location.search) return;
+    savePosition(link);
+  });
+
+  // pageshow also fires when the browser restores this page from its back/forward
+  // cache. Every new action overwrites the single token with its latest position.
+  window.addEventListener('pageshow', restorePosition);
 })();
 </script>
 {% endblock %}

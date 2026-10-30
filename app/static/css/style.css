@@ -602,3 +602,63 @@ audio { width: 100%; margin: 0.25rem 0 0.75rem; }
     gap: 0.4rem;
   }
 }
+
+
+/* ---- Per-feed episode statistics on the start page ---------------------- */
+.feed-episode-stats {
+  margin-top: 0.55rem;
+  padding: 0.65rem 0.75rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+.feed-episode-stats-heading {
+  margin-bottom: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.feed-episode-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+.feed-episode-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.08rem;
+}
+.feed-episode-stat-value {
+  color: var(--text);
+  font-size: 1.15rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+.feed-episode-stat-label {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feed-episode-stat-published .feed-episode-stat-value { color: var(--success); }
+.feed-episode-stat-errors .feed-episode-stat-value { color: var(--danger); }
+.feed-episode-stat-remaining .feed-episode-stat-value { color: var(--medium); }
+.feed-episode-stats-note {
+  margin-top: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+@media (max-width: 560px) {
+  .feed-episode-stats { padding: 0.55rem 0.6rem 0.45rem; }
+  .feed-episode-stats-grid { gap: 0.25rem; }
+  .feed-episode-stat-value { font-size: 1.05rem; }
+  .feed-episode-stat-label { font-size: 0.66rem; }
+}

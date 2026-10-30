@@ -251,6 +251,51 @@ def mark_episode_heard_elsewhere(
     return RedirectResponse(url=target, status_code=303)
 
 
+@router.post("/feeds/{feed_id}/episodes/heard-all")
+def mark_all_feed_episodes_heard_elsewhere(
+    feed_id: int,
+    session: Session = Depends(get_session),
+):
+    """Mark every still-published episode of one feed as heard elsewhere.
+
+    Uses the same tombstone and guarded local-file cleanup as the queue's single- and
+    multi-select actions. Non-published and already-excluded episodes are left alone.
+    """
+    feed = session.get(Feed, feed_id)
+    if feed is None:
+        return RedirectResponse(url="/", status_code=303)
+
+    episodes = session.exec(
+        select(Episode)
+        .where(Episode.feed_id == feed_id)
+        .where(Episode.status == EpisodeStatus.PUBLISHED)
+        .where(Episode.heard_elsewhere == False)  # noqa: E712
+        .order_by(Episode.id)
+    ).all()
+
+    cleanup_items = []
+    for episode in episodes:
+        cleanup = _prepare_episode_as_heard_elsewhere(session, episode)
+        if cleanup is not None:
+            cleanup_items.append(cleanup)
+
+    # Persist all tombstones/segment deletions before touching filesystem data.
+    if cleanup_items:
+        session.commit()
+        for cleanup_episode_id, cleanup_feed_id, stored_paths, title in cleanup_items:
+            _delete_episode_local_files(cleanup_episode_id, cleanup_feed_id, stored_paths)
+            log.info(
+                "Feed-wide heard-elsewhere action: episode %s (%s) removed from feed %s",
+                cleanup_episode_id,
+                title,
+                feed_id,
+            )
+
+    changed = len(cleanup_items)
+    log.info("Marked %s published episodes as heard elsewhere for feed %s", changed, feed_id)
+    return RedirectResponse(url=f"/?heard_count={changed}#feed-{feed_id}", status_code=303)
+
+
 @router.post("/queue/playlist/bulk-action")
 def bulk_playlist_action(
     action: str = Form(...),
@@ -391,3 +436,93 @@ def skip_selected_episodes(episode_ids: list[int] = Form(default=[]), session: S
             session.add(episode)
     session.commit()
     return RedirectResponse(url="/queue", status_code=303)
+
+
+@router.post("/feeds/{feed_id}/episodes/bulk-action")
+def bulk_feed_episode_action(
+    feed_id: int,
+    action: str = Form(...),
+    episode_ids: list[int] = Form(default=[]),
+    session: Session = Depends(get_session),
+):
+    """Apply feed-scoped actions to selected episodes using existing single-item logic."""
+    allowed_actions = {"delete_audio", "reprocess", "heard_elsewhere"}
+    if action not in allowed_actions or not episode_ids:
+        return RedirectResponse(url=f"/feeds/{feed_id}#feed-episodes", status_code=303)
+
+    feed = session.get(Feed, feed_id)
+    if feed is None:
+        return RedirectResponse(url="/", status_code=303)
+
+    # Constrain posted IDs to the feed currently shown; do not accept foreign episode IDs.
+    selected_ids = sorted(set(episode_ids))
+    episodes = session.exec(
+        select(Episode)
+        .where(Episode.feed_id == feed_id)
+        .where(Episode.id.in_(selected_ids))
+        .order_by(Episode.created_at.desc())
+    ).all()
+
+    changed = 0
+    heard_cleanup: list[tuple[int, int, dict[str, str | None], str]] = []
+    active_statuses = {
+        EpisodeStatus.DOWNLOADING,
+        EpisodeStatus.TRANSCRIBING,
+        EpisodeStatus.ANALYZING,
+        EpisodeStatus.CUTTING,
+    }
+
+    if action == "delete_audio":
+        # Same semantics as the per-episode "Löschen" button: evict cached audio,
+        # but retain the DB row/GUID so the episode may be downloaded again later.
+        for episode in episodes:
+            if episode.heard_elsewhere or episode.status != EpisodeStatus.PUBLISHED:
+                continue
+            if not episode.original_audio_path and not episode.processed_audio_path:
+                continue
+            cache_manager.evict_episode_audio(session, episode)
+            changed += 1
+        session.commit()
+
+    elif action == "reprocess":
+        # Match the individual "Neu analysieren" action and avoid interrupting active workers.
+        for episode in episodes:
+            if episode.heard_elsewhere or episode.status in active_statuses:
+                continue
+            if episode.status not in {EpisodeStatus.PENDING_REVIEW, EpisodeStatus.PUBLISHED}:
+                continue
+            episode.status = EpisodeStatus.REANALYZE
+            episode.error_message = None
+            episode.updated_at = datetime.now(timezone.utc)
+            session.add(episode)
+            changed += 1
+        session.commit()
+
+    else:  # heard_elsewhere
+        # The shared helper only accepts published episodes. Commit tombstones first,
+        # then delete their local files after the database transaction succeeds.
+        for episode in episodes:
+            cleanup = _prepare_episode_as_heard_elsewhere(session, episode)
+            if cleanup is not None:
+                heard_cleanup.append(cleanup)
+        if heard_cleanup:
+            session.commit()
+            for cleanup_episode_id, cleanup_feed_id, stored_paths, title in heard_cleanup:
+                _delete_episode_local_files(cleanup_episode_id, cleanup_feed_id, stored_paths)
+                log.info(
+                    "Bulk marked episode %s (%s) as heard elsewhere; local files removed",
+                    cleanup_episode_id,
+                    title,
+                )
+        changed = len(heard_cleanup)
+
+    log.info(
+        "Feed bulk action %s changed %s/%s selected episodes for feed %s",
+        action,
+        changed,
+        len(selected_ids),
+        feed_id,
+    )
+    # URL remains the same (fragment only), allowing the scroll-restoration script
+    # to recover the user's former feed-detail position after POST/Redirect/GET.
+    return RedirectResponse(url=f"/feeds/{feed_id}#feed-episodes", status_code=303)
