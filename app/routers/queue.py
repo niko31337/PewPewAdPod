@@ -225,18 +225,30 @@ def _move_selected_playlist_entries(
 
 
 @router.post("/queue/episodes/{episode_id}/heard-elsewhere")
-def mark_episode_heard_elsewhere(episode_id: int, session: Session = Depends(get_session)):
-    """Permanently exclude a published episode and delete its local media files."""
+def mark_episode_heard_elsewhere(
+    episode_id: int,
+    back_to_feed: bool = False,
+    session: Session = Depends(get_session),
+):
+    """Permanently exclude a published episode and delete its local media files.
+
+    The optional boolean return flag is deliberately not an arbitrary URL: callers may
+    return either to the Queue playlist (default) or to this episode's own feed page.
+    Both entry points use this exact cleanup path.
+    """
     episode = session.get(Episode, episode_id)
+    feed_id = episode.feed_id if episode is not None else None
     cleanup = _prepare_episode_as_heard_elsewhere(session, episode) if episode else None
     if cleanup is None:
-        return RedirectResponse(url="/queue#playlist", status_code=303)
+        target = f"/feeds/{feed_id}" if back_to_feed and feed_id is not None else "/queue#playlist"
+        return RedirectResponse(url=target, status_code=303)
 
     session.commit()
     cleanup_episode_id, feed_id, stored_paths, title = cleanup
     _delete_episode_local_files(cleanup_episode_id, feed_id, stored_paths)
     log.info("Episode %s (%s) marked as heard elsewhere; local files removed", cleanup_episode_id, title)
-    return RedirectResponse(url="/queue#playlist", status_code=303)
+    target = f"/feeds/{feed_id}" if back_to_feed else "/queue#playlist"
+    return RedirectResponse(url=target, status_code=303)
 
 
 @router.post("/queue/playlist/bulk-action")

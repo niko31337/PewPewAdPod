@@ -3,6 +3,7 @@ import shutil
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -43,6 +44,37 @@ def index(
     session: Session = Depends(get_session),
 ):
     feeds = session.exec(select(Feed).order_by(Feed.created_at)).all()
+
+    # Match the public feed generator: only successfully published episodes that
+    # still have a processed audio file are candidates. Pick the most recently
+    # published episode per feed (not the most recent RSS entry/import).
+    feed_ids = [feed.id for feed in feeds if feed.id is not None]
+    latest_published_by_feed = {}
+    if feed_ids:
+        ranked_episodes = (
+            select(
+                Episode.id.label("episode_id"),
+                func.row_number()
+                .over(
+                    partition_by=Episode.feed_id,
+                    order_by=(Episode.published_at.desc(), Episode.id.desc()),
+                )
+                .label("episode_rank"),
+            )
+            .where(Episode.feed_id.in_(feed_ids))
+            .where(Episode.status == EpisodeStatus.PUBLISHED)
+            .where(Episode.processed_audio_path.is_not(None))
+            .where(Episode.published_at.is_not(None))
+            .where(Episode.heard_elsewhere == False)  # noqa: E712
+            .subquery()
+        )
+        latest_episodes = session.exec(
+            select(Episode)
+            .join(ranked_episodes, Episode.id == ranked_episodes.c.episode_id)
+            .where(ranked_episodes.c.episode_rank == 1)
+        ).all()
+        latest_published_by_feed = {episode.feed_id: episode for episode in latest_episodes}
+
     feed_exposure_mode = cache_manager.get_or_create_config(session).feed_exposure_mode
     return templates.TemplateResponse(
         request,
@@ -52,6 +84,7 @@ def index(
             "default_threshold": settings.default_auto_cut_threshold,
             "opml_imported": opml_imported,
             "feed_exposure_mode": feed_exposure_mode,
+            "latest_published_by_feed": latest_published_by_feed,
             "requeued": requeued,
         },
     )

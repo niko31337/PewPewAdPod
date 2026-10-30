@@ -119,6 +119,22 @@
         <img src="/media/covers/{{ feed.id }}/cover.jpg" alt="" style="width:64px;height:64px;border-radius:6px;object-fit:cover;">
         {% endif %}
       </div>
+      {% set latest_episode = latest_published_by_feed.get(feed.id) %}
+      <div class="feed-latest-published-card{% if not latest_episode %} feed-latest-published-empty{% endif %}">
+        <div class="feed-latest-published-main">
+          <span class="feed-latest-published-label">Zuletzt werbefrei veröffentlicht</span>
+          {% if latest_episode %}
+            <strong class="feed-latest-published-title">{{ latest_episode.title }}</strong>
+          {% else %}
+            <span class="feed-latest-published-title feed-latest-published-placeholder">Noch keine bereinigte Episode veröffentlicht.</span>
+          {% endif %}
+        </div>
+        {% if latest_episode and latest_episode.published_at %}
+          <time class="feed-latest-published-date" datetime="{{ latest_episode.published_at.isoformat() }}">{{ latest_episode.published_at.strftime("%d.%m.%Y") }}</time>
+        {% else %}
+          <span class="feed-latest-published-date">—</span>
+        {% endif %}
+      </div>
       <form method="post" action="/feeds/{{ feed.id }}/toggle-preferred" class="preferred-feed-form">
         <label class="preferred-feed-label">
           <input type="checkbox" name="preferred" value="true" onchange="this.form.submit()" {% if feed.preferred %}checked{% endif %}>

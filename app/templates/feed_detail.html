@@ -77,18 +77,31 @@
         {% if ep.status == "pending_review" %}
           <a href="/episodes/{{ ep.id }}/review"><button>Review</button></a>
         {% elif ep.status == "published" and ep.processed_audio_path %}
-          <audio controls src="/media/audio/processed/{{ ep.processed_audio_path | basename }}"></audio>
-          <div style="margin-top:0.4rem;">
-            <form method="post" action="/episodes/{{ ep.id }}/delete-audio" style="display:inline;"
+          <audio class="feed-episode-audio" controls src="/media/audio/processed/{{ ep.processed_audio_path | basename }}"
+                 style="display:block;max-width:100%;margin:0.15rem 0 0.35rem;"></audio>
+          <div class="episode-action-row" style="display:flex;align-items:center;flex-wrap:wrap;gap:0.35rem;margin-top:0.4rem;">
+            <form method="post" action="/episodes/{{ ep.id }}/delete-audio" style="display:inline-flex;margin:0;"
                   onsubmit="return confirm('Heruntergeladene Audiodaten dieser Episode wirklich löschen? Sie kann jederzeit erneut heruntergeladen werden.');">
-              <button type="submit" class="danger" title="Lokale Audiodateien löschen, um Speicherplatz freizugeben">Löschen</button>
+              <button type="submit" class="danger" style="padding:0.32rem 0.58rem;font-size:0.78rem;line-height:1.25;white-space:nowrap;" title="Lokale Audiodateien löschen, um Speicherplatz freizugeben">Löschen</button>
+            </form>
+            <form method="post" action="/episodes/{{ ep.id }}/reprocess" style="display:inline-flex;margin:0;"
+                  onsubmit="return confirm('Episode erneut analysieren? Die vorhandene Verarbeitung wird neu erstellt.');">
+              <button type="submit" class="secondary" style="padding:0.32rem 0.58rem;font-size:0.78rem;line-height:1.25;white-space:nowrap;" title="Episode erneut analysieren, z. B. nach neuen Jingles">Neu analysieren</button>
+            </form>
+            <form method="post" action="/queue/episodes/{{ ep.id }}/heard-elsewhere?back_to_feed=true" style="display:inline-flex;margin:0;"
+                  onsubmit="return confirm('Diese Episode als bereits anderswo gehört markieren? Sie wird dauerhaft aus den Feeds entfernt. Lokale Audio-, Korrektur-, Transkript- und Episoden-Cover-Dateien werden gelöscht und die Episode wird nicht erneut verarbeitet.');">
+              <button type="submit" class="danger" style="padding:0.32rem 0.58rem;font-size:0.78rem;line-height:1.25;white-space:nowrap;" title="Dauerhaft ausschließen und alle lokalen Episodendateien löschen">Anderswo gehört</button>
             </form>
           </div>
         {% elif ep.status == "published" %}
           <span class="muted">Audio nicht mehr im Cache</span>
-          <div style="margin-top:0.4rem;">
-            <form method="post" action="/episodes/{{ ep.id }}/reprocess">
-              <button type="submit" title="Episode erneut vom Original-Feed herunterladen">Herunterladen</button>
+          <div class="episode-action-row" style="display:flex;align-items:center;flex-wrap:wrap;gap:0.35rem;margin-top:0.4rem;">
+            <form method="post" action="/episodes/{{ ep.id }}/reprocess" style="display:inline-flex;margin:0;">
+              <button type="submit" class="secondary" style="padding:0.32rem 0.58rem;font-size:0.78rem;line-height:1.25;white-space:nowrap;" title="Episode erneut vom Original-Feed herunterladen">Herunterladen</button>
+            </form>
+            <form method="post" action="/queue/episodes/{{ ep.id }}/heard-elsewhere?back_to_feed=true" style="display:inline-flex;margin:0;"
+                  onsubmit="return confirm('Diese Episode als bereits anderswo gehört markieren? Sie wird dauerhaft aus den Feeds entfernt. Lokale Audio-, Korrektur-, Transkript- und Episoden-Cover-Dateien werden gelöscht und die Episode wird nicht erneut verarbeitet.');">
+              <button type="submit" class="danger" style="padding:0.32rem 0.58rem;font-size:0.78rem;line-height:1.25;white-space:nowrap;" title="Dauerhaft ausschließen und alle lokalen Episodendateien löschen">Anderswo gehört</button>
             </form>
           </div>
         {% elif ep.status.startswith("failed_") or ep.status == "error_permanent" %}
@@ -115,7 +128,7 @@
         {% else %}
           <span class="muted">wird verarbeitet…</span>
         {% endif %}
-        {% if ep.status == "pending_review" or (ep.status == "published" and ep.processed_audio_path) %}
+        {% if ep.status == "pending_review" %}
           <form method="post" action="/episodes/{{ ep.id }}/reprocess" style="margin-top:0.4rem;">
             <button type="submit" class="secondary" title="Erneut analysieren, z. B. nach neuen Jingles">Neu analysieren</button>
           </form>

@@ -338,6 +338,70 @@ audio { width: 100%; margin: 0.25rem 0 0.75rem; }
 .preferred-feed-label { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600; font-size: 0.85rem; }
 .feed-actions form { margin: 0; }
 
+/* Latest successfully processed episode on each feed card. */
+.feed-latest-published-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  margin-top: 0.65rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+.feed-latest-published-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.feed-latest-published-label {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+.feed-latest-published-title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.feed-latest-published-placeholder {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.feed-latest-published-date {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.feed-latest-published-empty {
+  border-style: dashed;
+  border-left-width: 1px;
+  background: transparent;
+}
+@media (max-width: 560px) {
+  .feed-latest-published-card {
+    align-items: flex-start;
+    gap: 0.45rem;
+    padding: 0.55rem 0.6rem;
+  }
+  .feed-latest-published-date { padding-top: 0.1rem; }
+}
 
 /* ---- Queue playlist ------------------------------------------------------- */
 .playlist-header {
